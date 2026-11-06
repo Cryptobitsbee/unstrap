@@ -116,6 +116,8 @@ class FirmwareViewModel(
         _step.update { if (it is S) next else it }
     }
 
+    // Each return is a reason the check can't start.
+    @Suppress("ReturnCount")
     fun check() {
         if (busy) return
         val acc = account.value ?: return fail(strings.get(R.string.you_firmware_no_account))

@@ -71,7 +71,8 @@ object WeeklyRecap {
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         // Sent once it has been shown: a denied permission or a failed post leaves the week for the next look this morning.
-        val shown = catching { show(context, RewardsCopy.weekRange(lastWeek), RewardsCopy.recapText(week, Rewards.inARow(weeks, lastWeek))) }
+        val text = RewardsCopy.recapText(week, Rewards.inARow(weeks, lastWeek))
+        val shown = catching { show(context, RewardsCopy.weekRange(lastWeek), text) }
             .onFailure { Log.w("unstrap", "weekly recap: not shown: $it") }
         if (shown.isSuccess) settings.setRecapWeek(lastWeek.toEpochDay())
     }

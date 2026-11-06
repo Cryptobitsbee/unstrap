@@ -221,7 +221,7 @@ class WorkoutSession(
         repeat(RESTORE_TRIES) {
             delay(restoreRetryMs)
             val done = catching { restoreLocked()?.let { l -> scope.launch { awaitStrap(l) } } }
-                .onFailure { log("workout not restored, ${it.message}") }.isSuccess
+                .onFailure { e -> log("workout not restored, ${e.message}") }.isSuccess
             if (done) return
         }
         log("workout not restored: left as stored for the next start")

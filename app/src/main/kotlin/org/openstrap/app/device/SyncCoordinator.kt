@@ -165,14 +165,19 @@ internal class SyncCoordinator(
                 syncEnded.tryEmit(Unit)
             }
         }
-        // A sync cut off by a lost link can end only after the reconnect, which skipped its own sync while this one
-        // still showed as running. Run it again on the new link.
-        val current = link.activeSession
-        if (ran && sync.value is SyncState.Failed && current != null && current !== s) {
-            log("sync cut off by the old link, syncing again")
-            requests.trySend(SyncRequest.Full(manual = false, session = current))
-        }
+        if (ran) retryCutOff(s)
         if (leftover) requests.trySend(SyncRequest.Full(manual = true, session = null))
+    }
+
+    /**
+     * A sync cut off by a lost link can end only after the reconnect, which skipped its own sync while this one still
+     * showed as running. Run it again on the new link.
+     */
+    private fun retryCutOff(old: ChannelSession) {
+        val current = link.activeSession ?: return
+        if (current === old || sync.value !is SyncState.Failed) return
+        log("sync cut off by the old link, syncing again")
+        requests.trySend(SyncRequest.Full(manual = false, session = current))
     }
 
     /** One debug dump, which writes Running and must not leave it behind. */

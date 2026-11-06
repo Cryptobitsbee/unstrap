@@ -153,7 +153,9 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
     val context = LocalContext.current
     var photoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     val decoded by produceState<SharePhoto>(SharePhoto.None, photoUri) {
-        value = photoUri?.let { uri -> decodePhoto(context, uri)?.let { SharePhoto.Ready(uri, it) } ?: SharePhoto.Failed(uri) } ?: SharePhoto.None
+        value = photoUri?.let { uri ->
+            decodePhoto(context, uri)?.let { SharePhoto.Ready(uri, it) } ?: SharePhoto.Failed(uri)
+        } ?: SharePhoto.None
     }
     val photoState = sharePhotoFor(photoUri, decoded)
     val photo = (photoState as? SharePhoto.Ready)?.bitmap
@@ -215,7 +217,10 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
                 // Not while the photo is still being read (the card would save without it) or another export is running.
                 val ready = canExport && export == null
                 val dim = Modifier.alpha(if (canExport) 1f else 0.4f)
-                WorkoutButton(saveLabel, Raised, Color.White, { if (ready) save() }, Modifier.weight(1f).then(dim), icon = if (saved == true) AppIcons.Tick02 else AppIcons.DownloadSimple)
+                WorkoutButton(
+                    saveLabel, Raised, Color.White, { if (ready) save() }, Modifier.weight(1f).then(dim),
+                    icon = if (saved == true) AppIcons.Tick02 else AppIcons.DownloadSimple,
+                )
                 WorkoutButton(
                     stringResource(R.string.glow_share), Color.White, Color.Black, { if (ready) export = Export.Share },
                     Modifier.weight(1f).then(dim), icon = AppIcons.UploadSimple,
@@ -262,7 +267,8 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
                 )
                 if (photoState is SharePhoto.Failed) {
                     Text(
-                        stringResource(R.string.glow_share_photo_failed), color = Color.White.copy(alpha = 0.6f), style = GlowType.secondary,
+                        stringResource(R.string.glow_share_photo_failed),
+                        color = Color.White.copy(alpha = 0.6f), style = GlowType.secondary,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                 }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -145,8 +146,8 @@ internal fun SleepScoreDetail(
     // didn't happen.
     var pendingDelete by remember(state.date) { mutableStateOf<SleepSession?>(null) }
     var undo by remember(state.date) { mutableStateOf<SleepSession?>(null) }
-    LaunchedEffect(pendingDelete, session) {
-        val gone = pendingDelete ?: return@LaunchedEffect
+    SideEffect {
+        val gone = pendingDelete ?: return@SideEffect
         if (session == null) { undo = gone; pendingDelete = null }
     }
     // TODO(step 6): Month and Year wait for a stored history of the strap's sleep scores; the day loads only 14 nights.
@@ -568,8 +569,8 @@ internal fun NapsDetail(
     // the same while its Undo shows. For this day only.
     var pendingDelete by remember(state.date) { mutableStateOf<Pair<SleepSession, Long>?>(null) }
     var undo by remember(state.date) { mutableStateOf<Pair<SleepSession, Long>?>(null) }
-    LaunchedEffect(pendingDelete, state.napsAsDetected) {
-        val gone = pendingDelete ?: return@LaunchedEffect
+    SideEffect {
+        val gone = pendingDelete ?: return@SideEffect
         if (state.napsAsDetected[gone.second] == null) { undo = gone; pendingDelete = null }
     }
     val total = naps.sumOf { it.end - it.start }
@@ -680,7 +681,8 @@ internal fun NapsDetail(
         if (nap == null || detected == null) androidx.compose.runtime.SideEffect { deleting = null }
         else DeleteSleepSheet(
             SleepCopy.deleteTitle(true, isToday), Ranges.of(clock(nap.start), clock(nap.end)),
-            onDelete = { deleting = null; editing.delete(detected); pendingDelete = detected to nap.start }, onDismiss = { deleting = null },
+            onDelete = { deleting = null; editing.delete(detected); pendingDelete = detected to nap.start },
+            onDismiss = { deleting = null },
         )
     }
 }

@@ -282,7 +282,8 @@ internal class ConnectionManager(
                     client.lost()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_ON -> onLane {
-                    if (!wantConnected || unusable || connection.value is ConnectionState.Connected || connectJob?.isActive == true) return@onLane
+                    val connected = connection.value is ConnectionState.Connected || connectJob?.isActive == true
+                    if (!wantConnected || unusable || connected) return@onLane
                     log("bluetooth back on, reconnecting")
                     retries = 0
                     reconnectJob?.cancel()

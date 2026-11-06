@@ -50,6 +50,7 @@ class BackupSnapshot private constructor(private val file: File, val database: O
         private const val PREFIX = "backup-snapshot-"
 
         /** Copies [source] into the cache and opens the copy. Blocking: call it off the main thread. */
+        @Suppress("TooGenericExceptionCaught")
         fun take(context: Context, source: OpenStrapDatabase): BackupSnapshot {
             val file = File(context.cacheDir, "$PREFIX${UUID.randomUUID()}.db")
             try {
@@ -58,7 +59,7 @@ class BackupSnapshot private constructor(private val file: File, val database: O
                 val copy = Room.databaseBuilder(context, OpenStrapDatabase::class.java, file.path).build()
                 return BackupSnapshot(file, copy)
             } catch (e: Throwable) {
-                // A copy that never opened is not left behind.
+                // A copy that never opened is not left behind, whatever went wrong. Rethrown as it was.
                 SQLiteDatabase.deleteDatabase(file)
                 throw e
             }

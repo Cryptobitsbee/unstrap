@@ -278,12 +278,14 @@ private fun AccountPanel(
                 },
             )
             PageButton(
-                stringResource(if (account == null) R.string.you_pair_sign_in else R.string.you_zepp_sign_in_again), { mode = AccountMode.SigningIn },
+                stringResource(if (account == null) R.string.you_pair_sign_in else R.string.you_zepp_sign_in_again),
+                { mode = AccountMode.SigningIn },
                 Modifier.fillMaxWidth(), enabled = enabled, primary = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PageButton(
-                    stringResource(if (account == null) R.string.you_zepp_paste_token else R.string.you_zepp_edit), { mode = AccountMode.EditingToken },
+                    stringResource(if (account == null) R.string.you_zepp_paste_token else R.string.you_zepp_edit),
+                    { mode = AccountMode.EditingToken },
                     Modifier.weight(1f), enabled = enabled,
                 )
                 if (account != null) {

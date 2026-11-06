@@ -352,16 +352,18 @@ internal fun MinusPlus(
  */
 @Composable
 private fun StrapHeldNotice(connection: ConnectionState) {
-    if (connection is ConnectionState.Connected || connection == ConnectionState.Connecting || connection == ConnectionState.Authenticating) return
     val container = (LocalContext.current.applicationContext as? OpenStrapApp)?.container ?: return
     val held by container.settings.heldDisconnected.collectAsStateWithLifecycle(false)
-    if (!held || connection == ConnectionState.NotPaired) return
+    val away = connection == ConnectionState.Disconnected || connection is ConnectionState.Failed
+    if (!held || !away) return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            stringResource(R.string.glow_ready_strap_disconnected), color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
-            style = GlowType.secondary,
+            stringResource(R.string.glow_ready_strap_disconnected),
+            color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
         )
-        PageButton(stringResource(R.string.glow_ready_connect), container.strap::connect, Modifier.fillMaxWidth(), icon = AppIcons.Bluetooth)
+        PageButton(
+            stringResource(R.string.glow_ready_connect), container.strap::connect, Modifier.fillMaxWidth(), icon = AppIcons.Bluetooth,
+        )
     }
 }
 

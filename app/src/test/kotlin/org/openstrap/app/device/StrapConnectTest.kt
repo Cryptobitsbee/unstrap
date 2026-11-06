@@ -211,7 +211,8 @@ class StrapConnectTest {
         assertEquals(ConnectionState.Disconnected, strap.connection.value)
         // Opening the app is the user's: it clears the hold and connects.
         strap.autoConnect()
-        delay(1_000)
+        // The connect reads the paired strap on a real thread first, so wait for it rather than for virtual time.
+        strap.connection.first { it == ConnectionState.Connecting }
         assertEquals(strap.log.value.joinToString("\n"), 2, strap.log.value.count { it.contains("connecting to") })
     }
 

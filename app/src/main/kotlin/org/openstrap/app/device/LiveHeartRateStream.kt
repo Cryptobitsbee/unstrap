@@ -77,13 +77,13 @@ internal class LiveHeartRateStream(
         }
     }
 
-    fun setAppVisible(visible: Boolean) = set(Reason.AppVisible, visible)
+    fun setAppVisible(visible: Boolean) { set(Reason.AppVisible, visible) }
 
     fun setWorkoutActive(active: Boolean) {
         if (set(Reason.Workout, active)) log(if (active) "workout started: live hr stays on in the background" else "workout ended")
     }
 
-    fun setEffortWatch(active: Boolean) = set(Reason.EffortWatch, active)
+    fun setEffortWatch(active: Boolean) { set(Reason.EffortWatch, active) }
 
     /** True when [reason] changed. */
     private fun set(reason: Reason, on: Boolean): Boolean {

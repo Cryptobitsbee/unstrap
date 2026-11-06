@@ -17,7 +17,7 @@ import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -147,9 +147,9 @@ fun AlarmsScreen(
     // A refresh can change the alarm under an open sheet (a one-time alarm switching itself off, say). Saving the old copy
     // would undo that, so the sheet moves to the refreshed alarm and starts from its values; if the alarm is gone, or the
     // free slot of a new one was taken, there is nothing left to edit and the sheet closes.
-    LaunchedEffect(state.alarms, state.read) {
-        val open = editing ?: return@LaunchedEffect
-        if (state.read !is AlarmsRead.Loaded) return@LaunchedEffect
+    SideEffect {
+        val open = editing ?: return@SideEffect
+        if (state.read !is AlarmsRead.Loaded) return@SideEffect
         val (alarm, isNew) = open
         val now = state.alarms.firstOrNull { it.index == alarm.index }
         editing = when {
@@ -327,7 +327,8 @@ private fun AlarmSheet(alarm: Alarm, isNew: Boolean, busy: Boolean, onSave: (Ala
         }
         if (!isNew) {
             PageTextButton(
-                stringResource(R.string.you_alarms_delete), onDelete, Modifier.align(Alignment.CenterHorizontally), enabled = !busy, color = DestructiveInk,
+                stringResource(R.string.you_alarms_delete), onDelete, Modifier.align(Alignment.CenterHorizontally),
+                enabled = !busy, color = DestructiveInk,
             )
         }
     }

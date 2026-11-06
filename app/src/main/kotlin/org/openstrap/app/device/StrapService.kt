@@ -276,7 +276,8 @@ class StrapService : LifecycleService() {
             header = idleHeader(connected.takeIf { problem == null }, syncedAt),
             syncedAt = syncedAt, progress = (sync as? SyncState.Running)?.progress, syncing = sync is SyncState.Running,
             // A key the strap turned down fails the same way again: the Device page offers pairing again instead.
-            retry = c is ConnectionState.Failed && !c.keyRejected, connected = connected != null, sport = f?.sport ?: Workouts.DEFAULT_SPORTS.first(),
+            retry = c is ConnectionState.Failed && !c.keyRejected, connected = connected != null,
+            sport = f?.sport ?: Workouts.DEFAULT_SPORTS.first(),
             problem = when { c is ConnectionState.Failed -> "failed"; low -> "low"; problem != null -> "off"; else -> null },
         )
     }

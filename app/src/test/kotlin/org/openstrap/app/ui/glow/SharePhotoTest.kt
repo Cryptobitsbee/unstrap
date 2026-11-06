@@ -1,7 +1,7 @@
 package org.openstrap.app.ui.glow
 
 import android.net.Uri
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,7 +14,7 @@ import org.robolectric.annotation.Config
 class SharePhotoTest {
     private val first = Uri.parse("content://photos/1")
     private val second = Uri.parse("content://photos/2")
-    private val bitmap = ImageBitmap(1, 1)
+    private val bitmap = android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
 
     @Test fun `no pick is None whatever was decoded before`() {
         assertEquals(SharePhoto.None, sharePhotoFor(null, SharePhoto.Ready(first, bitmap)))

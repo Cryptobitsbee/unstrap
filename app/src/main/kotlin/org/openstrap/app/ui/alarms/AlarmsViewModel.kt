@@ -154,7 +154,9 @@ class AlarmsViewModel(private val strap: StrapController) : ViewModel() {
         }.onFailure { (strap as? StrapManager)?.log("alarms: read from the strap failed: $it") }
         _state.update { s ->
             read.fold(
-                { (caps, alarms, health) -> s.copy(read = AlarmsRead.Loaded, busy = false, error = error, caps = caps, alarms = alarms, health = health) },
+                { (caps, alarms, health) ->
+                    s.copy(read = AlarmsRead.Loaded, busy = false, error = error, caps = caps, alarms = alarms, health = health)
+                },
                 { e ->
                     val failed = error ?: ErrorCopy.strap(e, Strings.app.get(R.string.you_alarms_read_failed))
                     // Without an earlier good read there is nothing to show; with one, keep showing it beside the error.

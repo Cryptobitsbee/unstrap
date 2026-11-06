@@ -15,7 +15,9 @@ object PairingErrors {
     private const val BINDING_PROTECTED = 0x41
     private const val CLOUD_BIND_REQUIRED = 0x81
 
-    private val KEY_REJECTED = setOf(WRONG_KEY, CIPHERTEXT_MISMATCH, AES_FAILED, NO_KEY, SIGNATURE_FAILED, BINDING_PROTECTED, CLOUD_BIND_REQUIRED)
+    private val KEY_REJECTED = setOf(
+        WRONG_KEY, CIPHERTEXT_MISMATCH, AES_FAILED, NO_KEY, SIGNATURE_FAILED, BINDING_PROTECTED, CLOUD_BIND_REQUIRED,
+    )
 
     /** True when the strap turned the key down: the same key fails the same way until the user pairs again. */
     fun keyRejected(status: Int): Boolean = status in KEY_REJECTED

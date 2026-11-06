@@ -100,7 +100,9 @@ class WorkoutsViewModel(
      * is never taken for the one now.
      */
     val opened: StateFlow<OpenedWorkout> =
-        openStart.flatMapLatest { start -> if (start == null) flowOf(OpenedWorkout.Loading) else repo.open(start).map { OpenedWorkout.of(start, it) } }
+        openStart.flatMapLatest { start ->
+            if (start == null) flowOf(OpenedWorkout.Loading) else repo.open(start).map { OpenedWorkout.of(start, it) }
+        }
             .flowOn(work).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OpenedWorkout.Loading)
 
     /**
