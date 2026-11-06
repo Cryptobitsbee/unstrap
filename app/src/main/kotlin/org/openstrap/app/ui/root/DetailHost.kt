@@ -7,10 +7,12 @@ import androidx.compose.ui.res.stringResource
 import org.openstrap.app.R
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.Instant
 import java.time.LocalDate
@@ -35,10 +37,14 @@ import org.openstrap.app.ui.glow.GlowScoreDetailScreen
 import org.openstrap.app.ui.glow.GlowSleepScreen
 import org.openstrap.app.ui.glow.GlowWorkoutDetailScreen
 import org.openstrap.app.ui.glow.GlowWorkoutsScreen
+import org.openstrap.app.ui.dashboard.ScreenList
+import org.openstrap.app.ui.glow.GlowLayout
+import org.openstrap.app.ui.glow.GlowType
 import org.openstrap.app.ui.glow.PageHeader
 import org.openstrap.app.ui.glow.SleepEditing
 import org.openstrap.app.ui.glow.WeekDetail
 import org.openstrap.app.ui.glow.dayName
+import org.openstrap.app.ui.workout.OpenedWorkout
 import org.openstrap.app.ui.workout.WorkoutsViewModel
 
 /**
@@ -87,9 +93,11 @@ internal fun DetailHost(
             ),
         )
         is Detail.Workout -> {
-            val openWorkout by workoutsVm.open.collectAsStateWithLifecycle()
-            WorkoutDetail(
-                openWorkout?.takeIf { it.workout.start == detail.start }, padding, onBack = pop,
+            val opened by workoutsVm.opened.collectAsStateWithLifecycle()
+            // Only the answer for this workout counts: the one before it may still be showing as the new key loads.
+            val found = (opened as? OpenedWorkout.Found)?.analysis?.takeIf { it.workout.start == detail.start }
+            if (opened == OpenedWorkout.Missing(detail.start)) WorkoutMissing(padding, onBack = pop) else WorkoutDetail(
+                found, padding, onBack = pop,
                 onDelete = { container.workout.discard(detail.start); pop() },
                 workoutsVm = workoutsVm, session = container.workout,
                 bmrPerMinute = EnergyExpenditure.bmrPerMinute(profile, profile.age()),
@@ -118,6 +126,24 @@ internal fun DetailHost(
             GlowSleepScreen(
                 day, header = { PageHeader(stringResource(R.string.day_tab_sleep), pop, subtitle = dayName(day.date)) },
                 contentPadding = padding, onOpen = push, recovery = shown.recovery, onRestore = dayVm::restoreSleep,
+            )
+        }
+    }
+}
+
+/**
+ * The page for a workout that no longer exists (deleted, with a notification or a restored stack still pointing at
+ * it): the header with its back button and one line saying so, instead of the loading state, which would never end.
+ */
+@Composable
+private fun WorkoutMissing(contentPadding: PaddingValues, onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
+    ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
+        item { PageHeader(stringResource(R.string.glow_workout_untitled), onBack) }
+        item {
+            Text(
+                stringResource(R.string.glow_workout_deleted),
+                color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
             )
         }
     }
