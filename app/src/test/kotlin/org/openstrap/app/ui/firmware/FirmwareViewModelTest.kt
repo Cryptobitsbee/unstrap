@@ -19,6 +19,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
@@ -31,6 +32,11 @@ import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.lang.reflect.Proxy
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
+import kotlin.coroutines.resume
+import org.openstrap.protocol.firmware.DfuProgress
+import org.openstrap.protocol.firmware.FirmwareType
 
 /** The firmware view model stands on the strap, the settings, a cache folder and a file reader, not the whole app (audit A3). */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -76,6 +82,38 @@ class FirmwareViewModelTest {
         assertEquals(connection.value, vm.connection.value)
     }
 
+    @Test fun `events that don't fit the step are ignored, and late progress can't revive an install`() = runBlocking {
+        connection.value = ConnectionState.Connected(50, "3.25")
+        val vm = vm { ByteArrayInputStream(ByteArray(10)) }
+        val image = ReadyImage(ByteArray(2048), FirmwareType.FIRMWARE, "Firmware", null, fromCloud = false, trailer = null, warnings = emptyList())
+        vm.install(image)
+        val installing = vm.step.value
+        assertTrue(installing is FirmwareStep.Installing)
+
+        // A file picked, a check, or a second install during the install change nothing.
+        vm.loadFile(picked).join()
+        vm.check()
+        vm.install(image)
+        vm.reset()
+        assertEquals(installing, vm.step.value)
+
+        // Progress is applied while installing, then the install ends.
+        progress!!(DfuProgress.Applying)
+        assertTrue(vm.step.value is FirmwareStep.Installing)
+        installDone!!.resume(Unit)
+        assertEquals(FirmwareStep.Installed, vm.step.value)
+
+        // A callback that arrives after the end doesn't start it again.
+        progress!!(DfuProgress.Validating)
+        assertEquals(FirmwareStep.Installed, vm.step.value)
+        vm.reset()
+        progress!!(DfuProgress.Validating)
+        assertEquals(FirmwareStep.Idle, vm.step.value)
+    }
+
+    private var progress: ((DfuProgress) -> Unit)? = null
+    private var installDone: Continuation<Unit>? = null
+
     /** A strap whose link is [connection] and that does nothing else. */
     private fun strap(): StrapController {
         val flows = mutableMapOf<String, Any>()
@@ -85,6 +123,14 @@ class FirmwareViewModelTest {
                 method.name == "equals" -> proxy === args?.firstOrNull()
                 method.name == "toString" -> "test strap"
                 method.name == "getConnection" -> connection
+                // An install that stays open until the test ends it.
+                method.name == "installFirmware" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    progress = args!![2] as (DfuProgress) -> Unit
+                    @Suppress("UNCHECKED_CAST")
+                    installDone = args[3] as Continuation<Unit>
+                    COROUTINE_SUSPENDED
+                }
                 StateFlow::class.java.isAssignableFrom(method.returnType) -> flows.getOrPut(method.name) { MutableStateFlow<Any?>(null) }
                 SharedFlow::class.java.isAssignableFrom(method.returnType) -> flows.getOrPut(method.name) { MutableSharedFlow<Any?>() }
                 method.returnType == java.lang.Boolean.TYPE -> false

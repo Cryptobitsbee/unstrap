@@ -30,6 +30,8 @@
     <string name="update_install_downloading_size">Downloading, <xliff:g id="size" example="19.3 MB">%1$s</xliff:g></string>
     <!-- The install row once Android has the new version. unstrap closes itself to update. -->
     <string name="update_install_installing">Installing. unstrap closes when it\'s done</string>
+    <!-- Shown when Android's "Install unknown apps" switch stayed off after the user was sent to it. -->
+    <string name="update_install_not_allowed">unstrap isn\'t allowed to install apps, so it wasn\'t updated</string>
     <!-- The install row when the release on GitHub has no app file (APK) to install. -->
     <string name="update_install_no_apk">No app file in this release. Open it on GitHub</string>
     <!-- The install row while a workout records, and why an install waited for one: installing closes the app. -->
