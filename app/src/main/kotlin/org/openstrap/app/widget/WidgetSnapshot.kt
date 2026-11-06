@@ -114,7 +114,9 @@ class WidgetSnapshot(
     suspend fun gather(kinds: Set<WidgetKind>, now: Instant, zone: ZoneId): WidgetData {
         val today = now.atZone(zone).toLocalDate()
         val t = now.epochSecond
+        // The strap's status and whether it is syncing, read together: one moment for the status line.
         val strap = catching { settings.strapSnapshot.first() }.onFailure { logUnread("strap status", it) }.getOrNull()
+        val isSyncing = syncing()
         val workouts = if (kinds.any { it in MOOD_KINDS }) catching { recentWorkouts(t) } else null
         val span = if (kinds.any { it in NIGHT_KINDS }) catching { sleepSpanSessions(today, zone) } else null
         val moment = workouts?.let { w -> catching { momentInputs(w.getOrThrow(), span?.getOrNull(), today, t, zone) } }
@@ -131,7 +133,7 @@ class WidgetSnapshot(
             now = now,
             zone = zone,
             strap = strap,
-            syncing = syncing(),
+            syncing = isSyncing,
             moment = moment,
             usualBedtime = bedtime,
             steps = goal?.takeIf { WidgetKind.Steps in kinds }?.let { StepsRead(it, day) },
