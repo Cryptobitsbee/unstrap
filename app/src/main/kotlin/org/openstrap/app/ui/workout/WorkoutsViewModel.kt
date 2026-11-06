@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +32,21 @@ import java.time.LocalDate
 
 /** The data layer's summary, kept under its old name for the screens. */
 typealias PhoneSummary = org.openstrap.app.data.WorkoutSummaryData
+
+/** What reading the workout open in detail has found so far. */
+sealed interface OpenedWorkout {
+    /** Nothing has answered yet. */
+    data object Loading : OpenedWorkout
+
+    data class Found(val analysis: WorkoutAnalysis) : OpenedWorkout
+
+    /** No workout starts at [start]: it was deleted. */
+    data class Missing(val start: Long) : OpenedWorkout
+
+    companion object {
+        fun of(start: Long, analysis: WorkoutAnalysis?): OpenedWorkout = if (analysis == null) Missing(start) else Found(analysis)
+    }
+}
 
 /** Workouts list (newest first) and the one open in detail. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -77,8 +93,15 @@ class WorkoutsViewModel(
 
     private val openStart = MutableStateFlow<Long?>(null)
 
-    val open: StateFlow<WorkoutAnalysis?> = openStart.flatMapLatest { start -> if (start == null) flowOf(null) else repo.open(start) }
-        .flowOn(work).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /**
+     * The workout open in detail, read by its key: [OpenedWorkout.Loading] until the first read answers,
+     * [OpenedWorkout.Found], or [OpenedWorkout.Missing] when there is none with that start (deleted since a
+     * notification or a restored stack pointed at it). Each answer carries its key, so the one for the workout before
+     * is never taken for the one now.
+     */
+    val opened: StateFlow<OpenedWorkout> =
+        openStart.flatMapLatest { start -> if (start == null) flowOf(OpenedWorkout.Loading) else repo.open(start).map { OpenedWorkout.of(start, it) } }
+            .flowOn(work).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OpenedWorkout.Loading)
 
     /**
      * A phone workout's summary: its analysis, everything recorded (for trimming), and the strap's own record of it
