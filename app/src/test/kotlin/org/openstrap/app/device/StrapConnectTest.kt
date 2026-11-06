@@ -196,6 +196,48 @@ class StrapConnectTest {
     }
 
     @Test
+    fun afterDisconnectOnlyOpeningTheAppReconnects() = runTest {
+        val address = "AA:BB:CC:00:00:06"
+        pair(address)
+        val strap = StrapManager(context, settings, db.healthDao(), backgroundScope)
+        strap.connect()
+        strap.connection.first { it == ConnectionState.Connecting }
+        strap.disconnect()
+        strap.connection.first { it == ConnectionState.Disconnected }
+        // Presence events, a workout starting and the widget's Sync now all come through here.
+        strap.backgroundConnect()
+        delay(1_000)
+        assertEquals(strap.log.value.joinToString("\n"), 1, strap.log.value.count { it.contains("connecting to") })
+        assertEquals(ConnectionState.Disconnected, strap.connection.value)
+        // Opening the app is the user's: it clears the hold and connects.
+        strap.autoConnect()
+        delay(1_000)
+        assertEquals(strap.log.value.joinToString("\n"), 2, strap.log.value.count { it.contains("connecting to") })
+    }
+
+    @Test
+    fun aHoldFromBeforeTheProcessRestartStopsBackgroundConnects() = runTest {
+        pair("AA:BB:CC:00:00:07")
+        settings.setHeldDisconnected(true)
+        val strap = StrapManager(context, settings, db.healthDao(), backgroundScope)
+        strap.backgroundConnect()
+        delay(1_000)
+        assertTrue(strap.log.value.joinToString("\n"), strap.log.value.none { it.contains("connecting to") })
+    }
+
+    @Test
+    fun forgettingTheStrapShowsNotPaired() = runTest {
+        pair("AA:BB:CC:00:00:08")
+        val strap = StrapManager(context, settings, db.healthDao(), backgroundScope)
+        strap.connect()
+        strap.connection.first { it == ConnectionState.Connecting }
+        settings.forgetDevice()
+        strap.connection.first { it == ConnectionState.NotPaired }
+        assertEquals(null, strap.info.value)
+        assertTrue(open("AA:BB:CC:00:00:08").isEmpty())
+    }
+
+    @Test
     fun racingConnectsLeaveOneClientOpen() {
         val address = "AA:BB:CC:00:00:05"
         pair(address)

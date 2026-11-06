@@ -10,7 +10,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -99,47 +101,78 @@ internal class ConnectionManager(
 
     override val activeSession: ChannelSession? get() = session?.takeIf { connection.value is ConnectionState.Connected }
 
-    /** Connect if a strap is paired and nothing is connected or in progress. Safe to call often. */
+    /**
+     * The user opened the app: clear their Disconnect and connect if a strap is paired and nothing is connected or in
+     * progress. Safe to call often. Reconnects nobody asked for on screen are [backgroundConnect], which never clears
+     * the hold.
+     */
     // On the lane, and checking connectJob: callers race at process start (app start-up, the companion presence
     // service, phone alerts), before the connect coroutine has moved the state off Disconnected.
     fun autoConnect() {
         onLane {
-            when (connection.value) {
-                is ConnectionState.Connected, ConnectionState.Connecting, ConnectionState.Authenticating -> return@onLane
-                else -> Unit
-            }
-            if (reconnectJob?.isActive == true || connectJob?.isActive == true) return@onLane
+            if (busy()) return@onLane
             hold(false)
             wantConnection()
         }
     }
 
-    /** The user's Disconnect, kept across process restarts; null until read from settings. See [backgroundConnect]. */
+    /** On the lane: connected, connecting or waiting to retry. */
+    private fun busy(): Boolean {
+        when (connection.value) {
+            is ConnectionState.Connected, ConnectionState.Connecting, ConnectionState.Authenticating -> return true
+            else -> Unit
+        }
+        return reconnectJob?.isActive == true || connectJob?.isActive == true
+    }
+
+    /**
+     * The user's Disconnect, kept across process restarts; null until read from settings. Changed on the lane only (by
+     * [hold] and [isHeld]), so a Disconnect can't be undone by a command queued before it.
+     */
     @Volatile private var held: Boolean? = null
     // One at a time, in order, so a quick Disconnect then Connect can't land the other way round.
     // A lane of its own for the hold writes, so they can't queue behind the strap's traffic on the app scope.
     @Suppress("InjectDispatcher")
     private val heldWriter = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
+    /** On the lane. */
     private fun hold(value: Boolean) {
         if (held == value) return
         held = value
         heldWriter.launch { settings.setHeldDisconnected(value) }
     }
 
+    /**
+     * On the lane: the hold, read from settings once. A Disconnect or Connect landing while it is read wins over the
+     * stored value.
+     */
+    private suspend fun isHeld(): Boolean {
+        val stored = held ?: settings.heldDisconnected.first()
+        if (held == null) held = stored
+        return held == true
+    }
+
+    /**
+     * Reconnects nobody asked for on screen (companion presence, phone alerts, process start, a workout starting, the
+     * widget's Sync now). Never clears the hold: after the user's Disconnect only [connect] or opening the app
+     * ([autoConnect]) connects.
+     */
     fun backgroundConnect() {
-        scope.launch {
+        onLane {
             // Presence events repeat every few seconds while the strap advertises, so a skip isn't logged.
-            if (held ?: settings.heldDisconnected.first().also { held = it }) return@launch
+            if (isHeld()) return@onLane
             // Every try would fail the same way until the user acts (grants the permission, pairs again).
-            if (unusable) return@launch
-            autoConnect()
+            if (unusable) return@onLane
+            if (busy()) return@onLane
+            wantConnection()
         }
     }
 
     fun connect() {
-        hold(false)
-        onLane { wantConnection() }
+        onLane {
+            hold(false)
+            wantConnection()
+        }
     }
 
     /** On the lane. */
@@ -264,6 +297,33 @@ internal class ConnectionManager(
             context, bluetoothChanged, android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED),
             androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
         )
+        watchPaired()
+    }
+
+    /**
+     * NotPaired follows the paired strap, so after Forget the state is NotPaired and not a Disconnected the UI has to
+     * patch. Nothing is connected then: whatever is left of a link is ended here, in case Forget came without a
+     * Disconnect. Runs on the lane; the first value is the strap paired at start-up.
+     */
+    private fun watchPaired() = onLane {
+        settings.pairedDevice.map { it != null }.distinctUntilChanged().collect { paired ->
+            if (paired) {
+                if (connection.value == ConnectionState.NotPaired) connection.value = ConnectionState.Disconnected
+                return@collect
+            }
+            wantConnected = false
+            reconnectJob?.cancel()
+            connectJob?.cancel()
+            // Nothing to end at start-up, and the facade's hooks may not be wired yet.
+            val state = connection.value
+            if (gatt != null || (state != ConnectionState.Disconnected && state != ConnectionState.NotPaired)) {
+                hooks.onLinkEnded()
+                close()
+            }
+            connection.value = ConnectionState.NotPaired
+            // Forget removes the hold from settings; the next strap starts without it.
+            if (held == true) hold(false)
+        }
     }
 
     private fun watchDisconnect(client: GattClient) = onLane {
@@ -288,8 +348,8 @@ internal class ConnectionManager(
     }
 
     fun disconnect() {
-        hold(true)
         onLane {
+            hold(true)
             wantConnected = false
             reconnectJob?.cancel()
             connectJob?.cancel()

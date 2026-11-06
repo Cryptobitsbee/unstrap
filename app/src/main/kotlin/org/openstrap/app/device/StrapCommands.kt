@@ -48,7 +48,12 @@ internal class StrapCommands(
         return reply
     }
 
-    private var alarmCaps: AlarmCapabilities? = null
+    @Volatile private var alarmCaps: AlarmCapabilities? = null
+
+    /** The link ended or the strap was forgotten: the next alarm command asks the strap's limits again (a firmware update can change them). */
+    fun forgetAlarmCaps() {
+        alarmCaps = null
+    }
 
     private suspend fun alarmCaps(): AlarmCapabilities = alarmCaps ?: (
         AlarmCodec.parseVersion(command(Endpoints.ALARMS, AlarmCodec.versionRequest))

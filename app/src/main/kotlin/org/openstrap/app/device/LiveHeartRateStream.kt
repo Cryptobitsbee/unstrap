@@ -1,15 +1,23 @@
 package org.openstrap.app.device
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.openstrap.app.ble.GattClient
 import org.openstrap.app.ble.StrapUuids
 import org.openstrap.app.data.catching
@@ -22,7 +30,7 @@ import org.openstrap.protocol.u8
 
 /**
  * Live heart rate from the strap, on the channel push, or the standard 2A37 characteristic without it. It streams
- * only while the app is on screen, a workout records it, or workout auto-start watches for effort ([wanted]). There is
+ * only while the app is on screen, a workout records it, or workout auto-start watches for effort (one reason each in [reasons]). There is
  * no switch for it, as in Zepp: the strap's own measuring is set by its monitor frequency.
  */
 // One setter per reason to stream, as StrapController has them, plus start, stop and the reading.
@@ -38,80 +46,104 @@ internal class LiveHeartRateStream(
     val liveHeartRate = MutableStateFlow<Int?>(null)
     val heartRateReadings = MutableSharedFlow<Int>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    private var liveJob: Job? = null
-
     /** Which of the strap's heart rate sources is shown and recorded ([HeartRateSources]); guarded by itself. */
     private val sources = HeartRateSources()
 
-    /** Live HR streams only while the app is on screen, where it's shown, or while a workout records it. */
-    @Volatile private var appVisible = false
-    @Volatile private var workoutActive = false
+    /** Why live HR is wanted. It streams while any holds: the app on screen, a workout recording, or the effort watch. */
+    private enum class Reason { AppVisible, Workout, EffortWatch }
 
-    @Volatile private var effortWatch = false
+    private val reasons = MutableStateFlow<Set<Reason>>(emptySet())
 
-    private fun wanted() = workoutActive || effortWatch || appVisible
+    /** Bumped by each new connection, so a stream is opened again even when the link dropped and came back unseen. */
+    private val connects = MutableStateFlow(0)
 
-    val isRunning: Boolean get() = liveJob?.isActive == true
+    /** True from the first command of a stream to the end of its stop, so a stop is sent only for a stream that opened. */
+    private val wireOpen = MutableStateFlow(false)
 
-    fun setAppVisible(visible: Boolean) {
-        if (visible == appVisible) return
-        appVisible = visible
-        refresh()
+    /** The session and client the open stream was sent on, for its stop. Touched by the one coroutine in [follow] only. */
+    private var openSession: ChannelSession? = null
+    private var openClient: GattClient? = null
+
+    /** What [follow] acts on: stream or not, on which connection. */
+    private data class Plan(val stream: Boolean, val connect: Int)
+
+    init {
+        // One ordered coroutine owns the wire: collectLatest ends a stream (cancelled, then joined) before the next
+        // block starts, so a stop and a start can't cross, and a failed flash that ends firmwareUpdating restarts it.
+        scope.launch {
+            combine(reasons, connection, firmwareUpdating, connects) { r, c, fw, n ->
+                Plan(r.isNotEmpty() && c is ConnectionState.Connected && !fw, n)
+            }.distinctUntilChanged().collectLatest { follow(it) }
+        }
     }
+
+    fun setAppVisible(visible: Boolean) = set(Reason.AppVisible, visible)
 
     fun setWorkoutActive(active: Boolean) {
-        if (active == workoutActive) return
-        workoutActive = active
-        log(if (active) "workout started: live hr stays on in the background" else "workout ended")
-        refresh()
+        if (set(Reason.Workout, active)) log(if (active) "workout started: live hr stays on in the background" else "workout ended")
     }
 
-    fun setEffortWatch(active: Boolean) {
-        if (active == effortWatch) return
-        effortWatch = active
-        refresh()
+    fun setEffortWatch(active: Boolean) = set(Reason.EffortWatch, active)
+
+    /** True when [reason] changed. */
+    private fun set(reason: Reason, on: Boolean): Boolean {
+        var changed = false
+        reasons.update { current ->
+            changed = (reason in current) != on
+            if (on) current + reason else current - reason
+        }
+        return changed
     }
 
-    /** A new connection: starts streaming if [wanted]. */
+    /** A new connection: streams again if wanted. */
     fun onConnected() {
-        if (wanted()) start()
+        connects.update { it + 1 }
     }
 
     /** The link ended: the stream with it. */
     fun onLinkEnded() {
-        liveJob?.cancel()
         liveHeartRate.value = null
         synchronized(sources) { sources.reset() }
         sessionLogged = false
     }
 
-    /** Starts or stops streaming to match [wanted]; a stream already running is left alone. */
-    private fun refresh() {
-        if (!wanted()) {
-            if (liveJob?.isActive == true) pause()
-        } else if (liveJob?.isActive != true && !firmwareUpdating.value && connection.value is ConnectionState.Connected) {
-            start()
-        }
+    /**
+     * Stops streaming and returns once the strap has been told (or a few seconds passed), for a firmware update, which
+     * sets [firmwareUpdating] first: the stream follows it on its own, and starts again if the update fails.
+     */
+    suspend fun pause() {
+        withTimeoutOrNull(PAUSE_WAIT_MS) { wireOpen.first { !it } }
     }
 
-    /** Stops streaming for now (e.g. during a firmware update); [refresh] starts it again when it's wanted. */
-    fun pause() {
-        liveJob?.cancel()
+    private suspend fun follow(plan: Plan) {
+        if (plan.stream) stream() else closeWire()
+    }
+
+    /** Tells the strap to stop, if a stream was opened and the link is still up. Not cancellable: both commands go out. */
+    private suspend fun closeWire() {
         liveHeartRate.value = null
-        val s = link.session
-        val client = link.gatt
-        scope.launch { stop(s, client) }
+        val s = openSession
+        val client = openClient
+        openSession = null
+        openClient = null
+        if (!wireOpen.value) return
+        withContext(NonCancellable) {
+            if (connection.value is ConnectionState.Connected) stop(s, client)
+            wireOpen.value = false
+        }
     }
 
     // The catch-all rethrows a cancellation, and a failed stream only stops showing live HR.
     @Suppress("SuspendFunSwallowedCancellation", "TooGenericExceptionCaught")
-    private fun start() {
-        liveJob?.cancel()
+    private suspend fun stream() {
         liveHeartRate.value = null
         val s = link.activeSession ?: return
         val client = link.gatt ?: return
         synchronized(sources) { sources.reset() }
-        liveJob = scope.launch {
+        openSession = s
+        openClient = client
+        wireOpen.value = true
+        coroutineScope {
             launch { clearWhenStale() }
             try {
                 val channel = s.services.has(Endpoints.HEART_RATE)
@@ -243,5 +275,6 @@ internal class LiveHeartRateStream(
         const val OPEN_REPLY = 0x05
         const val SUBSCRIBE_REPLY = 0x04
         const val STALE_CHECK_MS = 2_000L
+        const val PAUSE_WAIT_MS = 5_000L
     }
 }

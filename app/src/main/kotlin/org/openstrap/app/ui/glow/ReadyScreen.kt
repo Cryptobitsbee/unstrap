@@ -5,6 +5,7 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -35,6 +37,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.openstrap.app.OpenStrapApp
 import org.openstrap.app.R
 import org.openstrap.app.data.SportSettings
 import org.openstrap.app.data.Strength
@@ -230,6 +234,7 @@ fun GlowWorkoutReadyScreen(
                 RoundIcon(AppIcons.X, stringResource(R.string.glow_close), onBack, Modifier.align(Alignment.CenterStart))
                 Box(Modifier.align(Alignment.Center)) { IconPill(Workouts.shortName(type), { picking = true }, caret = true) }
             }
+            StrapHeldNotice(connection)
             if (cardio) {
                 ReadyHeartCard(connection, liveHeartRate)
                 ReadyWhere(
@@ -337,6 +342,26 @@ internal fun MinusPlus(
         RoundIcon(AppIcons.Minus, less, onLess, size = buttonSize, iconSize = iconSize)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically, content = value)
         RoundIcon(AppIcons.Plus, more, onMore, size = buttonSize, iconSize = iconSize)
+    }
+}
+
+/**
+ * When the strap is away because you disconnected it, nothing reconnects it on its own (starting a workout doesn't):
+ * says so and offers Connect, which is an explicit connect. Nothing shows while it is connected, connecting, or away
+ * for any other reason.
+ */
+@Composable
+private fun StrapHeldNotice(connection: ConnectionState) {
+    if (connection is ConnectionState.Connected || connection == ConnectionState.Connecting || connection == ConnectionState.Authenticating) return
+    val container = (LocalContext.current.applicationContext as? OpenStrapApp)?.container ?: return
+    val held by container.settings.heldDisconnected.collectAsStateWithLifecycle(false)
+    if (!held || connection == ConnectionState.NotPaired) return
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            stringResource(R.string.glow_ready_strap_disconnected), color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
+            style = GlowType.secondary,
+        )
+        PageButton(stringResource(R.string.glow_ready_connect), container.strap::connect, Modifier.fillMaxWidth(), icon = AppIcons.Bluetooth)
     }
 }
 
