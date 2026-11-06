@@ -101,9 +101,10 @@ class WorkoutSessionTest {
 
     private fun session(
         leftWaitMs: Long = WorkoutSession.LEFT_WAIT_MS, on: Context = context, settings: SettingsStore = SettingsStore(context),
+        restoreRetryMs: Long = WorkoutSession.RESTORE_RETRY_MS,
     ) = WorkoutSession(
         on, dao, settings, strap, MaxHeartRates(dao, flowOf(profile())), clock = { clock.now }, scope = scope,
-        leftWaitMs = leftWaitMs,
+        leftWaitMs = leftWaitMs, restoreRetryMs = restoreRetryMs,
     )
 
     private fun <T> StateFlow<T>.await(what: String = "state", predicate: (T) -> Boolean): T = runBlocking {
@@ -226,6 +227,64 @@ class WorkoutSessionTest {
             assertEquals(emptyList<SportEffectRow>(), db.healthDao().sportEffectsOnce(t0, t0 + 3600))
             assertEquals(listOf(t0 + 306), db.healthDao().deletedWorkoutsAll().map { it.effectEnd })
         }
+    }
+
+    @Test
+    fun discardTakesTheTwinsAndDismissesInOneStep() {
+        val t0 = clock.now
+        runBlocking {
+            db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = t0 + 300, sportType = 1))
+            db.healthDao().insertWorkouts(listOf(Workout(t0 + 3, t0 + 304, 1, 300, null, null, null, null, null, null, null, null, null, 6)))
+            val gone = db.healthDao().discardAppWorkout(t0, clock.now)
+            assertEquals(t0, gone?.start)
+            assertNull(db.healthDao().appWorkoutOnce(t0))
+            assertNull(db.healthDao().workoutOnce(t0 + 3))
+            assertTrue(db.healthDao().dismissedWorkoutsAll().any { it.start == t0 && it.end == t0 + 300 })
+            // A second call finds nothing and changes nothing.
+            assertNull(db.healthDao().discardAppWorkout(t0, clock.now))
+        }
+    }
+
+    @Test
+    fun aStartWithoutGpsAvailableDoesNotClaimGps() {
+        val s = session()
+        val t0 = clock.now
+        s.start(sportType = 1, useGps = true, keepRoute = true)
+        // No location permission in the test: the workout records from steps and says so.
+        assertEquals(false, s.recording().workout.useGps)
+        assertEquals(false, stored(t0)!!.useGps)
+    }
+
+    @Test
+    fun aStartThatFailsHalfWayLeavesNothingBehind() {
+        val s = session()
+        val t0 = clock.now
+        strap.failActive = true
+        s.start(sportType = 1)
+        runBlocking {
+            withTimeout(WAIT_MS) {
+                while (strap.refused == 0 || stored(t0) != null || s.state.value !is WorkoutState.Idle) delay(POLL_MS)
+            }
+        }
+        assertNull(stored(t0))
+        // And the next one starts as usual.
+        strap.failActive = false
+        s.start(sportType = 1)
+        assertEquals(t0, s.recording().workout.start)
+    }
+
+    @Test
+    fun aRestoreThatFailsIsTriedAgainAndKeepsTheRow() {
+        val t0 = clock.now - 600
+        runBlocking { db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1)) }
+        strap.failActive = true
+        val s = session(restoreRetryMs = POLL_MS)
+        s.restore()
+        s.restored.await { it }
+        // Marked restored so nothing waits on it, yet the workout is not ended.
+        assertNull(stored(t0)!!.end)
+        strap.failActive = false
+        assertEquals(t0, s.recording().workout.start)
     }
 
     @Test
@@ -762,7 +821,15 @@ class WorkoutSessionTest {
         override fun disconnect() = Unit
         override fun syncNow() = Unit
         override fun setAppVisible(visible: Boolean) = Unit
-        override fun setWorkoutActive(active: Boolean) = Unit
+        /** Turning the live stream on fails, as a start that throws half way does. */
+        @Volatile var failActive = false
+        @Volatile var refused = 0
+        override fun setWorkoutActive(active: Boolean) {
+            if (failActive && active) {
+                refused++
+                throw IllegalStateException("strap refused")
+            }
+        }
         override fun setEffortWatch(active: Boolean) = Unit
         override suspend fun installFirmware(file: ByteArray, type: Int, onProgress: (org.openstrap.protocol.firmware.DfuProgress) -> Unit) = Unit
         override suspend fun readAlarms(): Pair<AlarmCapabilities, List<Alarm>> = throw StrapCommandException("not connected")
