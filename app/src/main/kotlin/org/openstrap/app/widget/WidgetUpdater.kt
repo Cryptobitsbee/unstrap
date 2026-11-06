@@ -20,6 +20,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.openstrap.app.BuildConfig
 import org.openstrap.app.OpenStrapApp
 import org.openstrap.app.data.MomentInputs
@@ -197,7 +199,15 @@ class WidgetUpdater(
     /** [kind]'s receiver and widget, null before it exists: for the debug widget gallery. */
     internal fun registration(kind: WidgetKind): Registration? = WIDGETS[kind]
 
-    internal suspend fun update(kinds: Set<WidgetKind>) {
+    /**
+     * One refresh at a time, in the order asked: a refresh reads and applies under this lock, so an older read can't
+     * land after a newer one (a sync's start and end can overlap on a short sync).
+     */
+    private val refreshing = Mutex()
+
+    internal suspend fun update(kinds: Set<WidgetKind>) = refreshing.withLock { refresh(kinds) }
+
+    private suspend fun refresh(kinds: Set<WidgetKind>) {
         val shown = placed().intersect(kinds)
         if (shown.isEmpty()) return
         // One read for every widget this refresh updates. A session that can't use it reads for itself.

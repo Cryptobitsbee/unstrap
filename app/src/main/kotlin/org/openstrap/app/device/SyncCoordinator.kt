@@ -3,6 +3,7 @@ package org.openstrap.app.device
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,6 +13,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.openstrap.app.ble.GattClient
 import org.openstrap.app.data.catching
 import org.openstrap.app.data.db.HealthDao
 import org.openstrap.app.data.settings.SettingsStore
@@ -55,78 +58,130 @@ internal class SyncCoordinator(
 
     /**
      * Sync right after connecting (unless one ran recently and didn't fail), then every [AUTO_SYNC_SECONDS] while
-     * connected. A failed one is retried at once: it was most likely cut off by the link this connect replaces.
+     * connected. A failed auto sync is retried at once: it was most likely cut off by the link this connect replaces.
+     * A failed Sync now isn't a reason: the user asked for that one, and the next auto sync isn't owed anything. A Sync
+     * now kept while there was no session ([held]) runs first.
      */
     fun autoSync(s: ChannelSession) = scope.launch {
         while (isActive && link.session === s) {
+            if (held) {
+                held = false
+                requests.trySend(SyncRequest.Full(manual = true, session = s))
+            }
             val now = nowSeconds()
-            val due = now - lastAutoSync >= MIN_SYNC_GAP_SECONDS || sync.value is SyncState.Failed
+            val due = now - lastAutoSync >= MIN_SYNC_GAP_SECONDS || (autoFailed && sync.value is SyncState.Failed)
             if (due && sync.value !is SyncState.Running && !firmwareUpdating.value) {
                 lastAutoSync = now
                 log("auto sync")
-                syncNow()
+                requests.trySend(SyncRequest.Full(manual = false, session = s))
             }
             delay(AUTO_SYNC_SECONDS * MILLIS_PER_SECOND)
         }
     }
 
-    fun syncNow() = startSync(full = true)
+    /** The user's Sync now. Kept, never lost: it waits for a session or a firmware update to end. */
+    fun syncNow() {
+        requests.trySend(SyncRequest.Full(manual = true, session = link.activeSession))
+    }
 
     /** The strap pushed new data of [types]: sync them now, or after the sync running. */
     fun syncPushed(types: Set<Int>) {
-        synchronized(pendingTypes) { pendingTypes += types }
-        startSync(full = false)
+        val s = link.activeSession ?: return
+        requests.trySend(SyncRequest.Types(types, s))
     }
 
-    /** One sync at a time; a full sync or types asked for meanwhile run when it ends. */
-    private val syncLock = Mutex()
-    private val pendingTypes = mutableSetOf<Int>()
-    private val pendingFull = java.util.concurrent.atomic.AtomicBoolean(false)
+    /**
+     * Everything asked for, in order. One worker reads it, so there is one sync at a time and a request made meanwhile
+     * is read when it ends.
+     */
+    private val requests = Channel<SyncRequest>(Channel.UNLIMITED)
 
-    /** A sync holds the lock, so a firmware install mustn't start. */
+    /** The worker's turn: a sync holds the lock, so a firmware install mustn't start. */
+    private val syncLock = Mutex()
+
+    /** A Sync now that found no session: it runs at the next connect ([autoSync]). */
+    @Volatile private var held = false
+
+    /** Whether the last sync that ran was an auto sync and failed. */
+    @Volatile private var autoFailed = false
+
     val isSyncing: Boolean get() = syncLock.isLocked
 
-    private fun takePending(): Set<Int> = synchronized(pendingTypes) { pendingTypes.toSet().also { pendingTypes.clear() } }
-    private fun hasPending(): Boolean = pendingFull.get() || synchronized(pendingTypes) { pendingTypes.isNotEmpty() }
+    init {
+        scope.launch {
+            for (first in requests) {
+                catching { work(listOf(first) + drain()) }.onFailure { log("sync worker: $it") }
+            }
+        }
+    }
 
-    /** What to sync next: null for everything (a full sync covers anything pushed so far), or the pushed types. */
-    private fun takeNext(): Set<Int>? = if (pendingFull.getAndSet(false)) { takePending(); null } else takePending()
+    private fun drain(): List<SyncRequest> {
+        val out = mutableListOf<SyncRequest>()
+        while (true) out += requests.tryReceive().getOrNull() ?: break
+        return out
+    }
 
+    /** Runs one batch of [asked] requests: the syncs they merge into, then the debug dumps. */
     // Each return is a reason not to sync now.
     @Suppress("ReturnCount")
-    private fun startSync(full: Boolean) {
-        if (firmwareUpdating.value) return
-        val s = link.activeSession ?: return
-        val client = link.gatt ?: return
-        if (full) pendingFull.set(true)
-        scope.launch {
-            // A sync is running: it picks up what was just queued when it finishes.
-            if (!syncLock.tryLock()) return@launch
-            try {
-                while (link.activeSession === s && !firmwareUpdating.value) {
-                    val only = takeNext()
-                    if (only != null && only.isEmpty()) break
-                    HistorySync(s, client, dao, settings, sync, log, notifiers.autoDetected::show).run(only)
-                    (sync.value as? SyncState.Done)?.let { d ->
-                        catching { settings.setLastSyncDone(d.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
-                    }
+    private suspend fun work(asked: List<SyncRequest>) {
+        var batch = asked
+        if (firmwareUpdating.value) {
+            // The strap is busy installing: keep the user's request, drop what the old firmware pushed.
+            firmwareUpdating.first { !it }
+            batch = batch.filter { it is SyncRequest.Full && it.manual || it is SyncRequest.Dump } + drain()
+        }
+        val s = link.activeSession
+        val client = link.gatt
+        val dumps = batch.filterIsInstance<SyncRequest.Dump>()
+        if (s == null || client == null) {
+            if (SyncPlan.of(batch, null).manual) held = true
+            if (dumps.isNotEmpty()) log("dump: not connected")
+            return
+        }
+        var leftover = false
+        var ran = false
+        syncLock.withLock {
+            var plan = SyncPlan.of(batch, s)
+            while (!plan.isEmpty) {
+                ran = true
+                HistorySync(s, client, dao, settings, sync, log, notifiers.autoDetected::show).run(plan.only)
+                autoFailed = !plan.manual && sync.value is SyncState.Failed
+                (sync.value as? SyncState.Done)?.let { d ->
+                    catching { settings.setLastSyncDone(d.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
                 }
+                val more = drain()
+                if (link.activeSession !== s || firmwareUpdating.value) {
+                    // The session ended or an install began: a kept Sync now goes round again, the rest is stale.
+                    leftover = SyncPlan.of(more, null).manual
+                    break
+                }
+                plan = SyncPlan.of(more, s)
+            }
+            for (d in dumps) dump(s, client, d)
+            if (ran) {
                 afterSync()
                 // Everything a widget shows may have moved (widgets spec 7): they watch for this.
                 syncEnded.tryEmit(Unit)
-            } finally {
-                syncLock.unlock()
             }
-            // A sync cut off by a lost link can end only after the reconnect, which skipped its own sync while this one
-            // still showed as running. Run it again on the new link.
-            val current = link.activeSession
-            if (sync.value is SyncState.Failed && current != null && current !== s) {
-                log("sync cut off by the old link, syncing again")
-                startSync(full = true)
-            } else if (hasPending()) {
-                // Something queued between the last check and the unlock would otherwise wait for the next trigger.
-                startSync(full = false)
-            }
+        }
+        // A sync cut off by a lost link can end only after the reconnect, which skipped its own sync while this one
+        // still showed as running. Run it again on the new link.
+        val current = link.activeSession
+        if (ran && sync.value is SyncState.Failed && current != null && current !== s) {
+            log("sync cut off by the old link, syncing again")
+            requests.trySend(SyncRequest.Full(manual = false, session = current))
+        }
+        if (leftover) requests.trySend(SyncRequest.Full(manual = true, session = null))
+    }
+
+    /** One debug dump, which writes Running and must not leave it behind. */
+    private suspend fun dump(s: ChannelSession, client: GattClient, d: SyncRequest.Dump) {
+        try {
+            val since = nowSeconds() - d.days * SECONDS_PER_DAY
+            HistorySync(s, client, dao, settings, sync, log).dumpRaw(since, java.io.File(context.filesDir, "raw"), d.types)
+        } finally {
+            if (sync.value is SyncState.Running) sync.value = SyncState.Idle
         }
     }
 
@@ -183,14 +238,9 @@ internal class SyncCoordinator(
         if (written > 0) log("daily energy: $written days")
     }
 
-    /** Debug aid, see [HistorySync.dumpRaw]. */
+    /** Debug aid, see [HistorySync.dumpRaw]. It takes its turn like any sync. */
     fun dumpRaw(days: Int, types: Set<Int>? = null) {
-        val s = link.activeSession ?: return log("dump: not connected")
-        val client = link.gatt ?: return
-        scope.launch {
-            val since = nowSeconds() - days * SECONDS_PER_DAY
-            HistorySync(s, client, dao, settings, sync, log).dumpRaw(since, java.io.File(context.filesDir, "raw"), types)
-        }
+        requests.trySend(SyncRequest.Dump(days, types))
     }
 
     private fun nowSeconds() = System.currentTimeMillis() / MILLIS_PER_SECOND
@@ -212,5 +262,50 @@ internal class SyncCoordinator(
         const val DAILY_CALORIES_PROFILE = "daily_energy_profile"
         /** The [org.openstrap.app.data.WorkoutEffect.MODEL] phone workouts' effects were last worked out with. */
         const val EFFECT_MODEL = "workout_effect_model"
+    }
+}
+
+/**
+ * What was asked of the sync worker. [session] is the one it was asked on (null for a Sync now that found none): a
+ * request for another session than the current one is stale, except a user's Sync now.
+ */
+internal sealed interface SyncRequest {
+    /** Everything. [manual] for the user's Sync now, false for the hourly one. */
+    data class Full(val manual: Boolean, val session: Any?) : SyncRequest
+
+    /** The types the strap pushed. */
+    data class Types(val types: Set<Int>, val session: Any?) : SyncRequest
+
+    /** Debug: [HistorySync.dumpRaw]. */
+    data class Dump(val days: Int, val types: Set<Int>?) : SyncRequest
+}
+
+/** A batch of [SyncRequest]s merged into one sync: everything, or just the pushed types. */
+internal class SyncPlan(val full: Boolean, val types: Set<Int>, val manual: Boolean) {
+    val isEmpty: Boolean get() = !full && types.isEmpty()
+
+    /** What [HistorySync.run] takes: null for everything (a full sync covers anything pushed), else the types. */
+    val only: Set<Int>? get() = if (full) null else types
+
+    companion object {
+        /**
+         * The plan for [requests] on the [current] session. A request made on another session is dropped, so it can't
+         * replay as a surprise sync; a user's Sync now stays whatever session it was made on. With no current session
+         * only that is left, which is what a caller keeps to run later.
+         */
+        fun of(requests: List<SyncRequest>, current: Any?): SyncPlan {
+            val live = requests.filter {
+                when (it) {
+                    is SyncRequest.Full -> it.manual || (current != null && it.session === current)
+                    is SyncRequest.Types -> current != null && it.session === current
+                    is SyncRequest.Dump -> false
+                }
+            }
+            return SyncPlan(
+                full = live.any { it is SyncRequest.Full },
+                types = live.filterIsInstance<SyncRequest.Types>().flatMapTo(mutableSetOf()) { it.types },
+                manual = live.any { it is SyncRequest.Full && it.manual },
+            )
+        }
     }
 }

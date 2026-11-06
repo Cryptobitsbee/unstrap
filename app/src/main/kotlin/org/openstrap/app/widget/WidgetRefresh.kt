@@ -2,6 +2,7 @@ package org.openstrap.app.widget
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import org.openstrap.app.BuildConfig
 import org.openstrap.app.data.WidgetKind
 import org.openstrap.app.ui.glow.draw.GlowMood
@@ -17,7 +18,7 @@ object WidgetRefresh {
     fun version(kind: WidgetKind): StateFlow<Int> = versions.getValue(kind)
 
     fun bump(kind: WidgetKind) {
-        versions.getValue(kind).value++
+        versions.getValue(kind).update { it + 1 }
     }
 
     private val resizes = WidgetKind.entries.associateWith { MutableStateFlow(0) }
@@ -26,7 +27,7 @@ object WidgetRefresh {
     fun resized(kind: WidgetKind): StateFlow<Int> = resizes.getValue(kind)
 
     fun resize(kind: WidgetKind) {
-        resizes.getValue(kind).value++
+        resizes.getValue(kind).update { it + 1 }
     }
 
     /**
