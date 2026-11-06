@@ -99,8 +99,7 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
     // The manual copy, or turning auto sync on ([forAuto]): with the write permissions, asked for first when missing.
     val write: (Boolean) -> Unit = { forAuto ->
         scope.launch {
-            // The calorie permissions are optional, but asked for again until granted: the launcher goes on with the
-            // ones it needs.
+            // The calorie permissions are optional and asked for only along with the needed ones.
             when (val hc = rootVm.healthConnectWrite()) {
                 HcState.Unavailable -> Toast.makeText(context, HC_UNAVAILABLE, Toast.LENGTH_LONG).show()
                 HcState.Installable -> Toast.makeText(context, HC_INSTALL_FIRST, Toast.LENGTH_LONG).show()
