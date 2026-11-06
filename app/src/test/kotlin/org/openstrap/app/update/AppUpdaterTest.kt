@@ -86,4 +86,36 @@ class AppUpdaterTest {
         assertTrue(thrown.toString(), thrown is FileNotFoundException)
         assertEquals(emptyList<Any>(), installer.allSessions)
     }
+
+    @Test fun `a failure after the process died is shown from the saved tag and clears it`() = runBlocking {
+        val settings = SettingsStore(app)
+        settings.setUpdateInstalling("v9.0.0")
+        val updater = AppUpdater(app, settings, recording = { false }, scope = scope)
+        updater.installResult(app, android.content.pm.PackageInstaller.STATUS_FAILURE_STORAGE, "full", null)
+        val failed = withTimeout(10_000) { updater.state.first { it.install is Install.Failed }.install as Install.Failed }
+        assertEquals("v9.0.0", failed.tag)
+        assertEquals(InstallFailure.Storage, failed.failure)
+        withTimeout(10_000) { while (settings.updateInstalling() != null) kotlinx.coroutines.delay(20) }
+    }
+
+    @Test fun `a saved tag with no installer session open is cleared at start`() = runBlocking {
+        val settings = SettingsStore(app)
+        settings.setUpdateInstalling("v9.0.0")
+        val updater = AppUpdater(app, settings, recording = { false }, scope = scope)
+        updater.reconcile()
+        withTimeout(10_000) { while (settings.updateInstalling() != null) kotlinx.coroutines.delay(20) }
+        assertEquals(Install.Idle, updater.state.value.install)
+    }
+
+    @Test fun `a saved tag for the version running is cleared`() = runBlocking {
+        val settings = SettingsStore(app)
+        val updater = AppUpdater(app, settings, recording = { false }, scope = scope)
+        settings.setUpdateInstalling("v${updater.installed}")
+        updater.reconcile()
+        withTimeout(10_000) { while (settings.updateInstalling() != null) kotlinx.coroutines.delay(20) }
+    }
+
+    @Test fun `the check state is one value`() {
+        assertEquals(Check.Idle, UpdateState().check)
+    }
 }

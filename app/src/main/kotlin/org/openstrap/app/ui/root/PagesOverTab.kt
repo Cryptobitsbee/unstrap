@@ -38,6 +38,7 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import org.openstrap.app.AppContainer
 import org.openstrap.app.PendingAction
+import org.openstrap.app.R
 import org.openstrap.app.data.HeartZones
 import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.SampleData
@@ -403,11 +404,24 @@ private fun UpdatesPageHost(container: AppContainer, rootVm: AppRootViewModel, p
     val allowLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         (waiting as? PendingAction.Install)?.let { install -> waiting = install.copy(answered = true) }
     }
+    val context = LocalContext.current
+    // Whatever way the wait ends, it is cleared: the install goes ahead, "install unknown apps" stayed off (a toast says
+    // so), or the release is gone from the list (the list is only empty before the saved one is read, so that waits).
     LaunchedEffect(waiting, updates.releases) {
         val install = (waiting as? PendingAction.Install)?.takeIf { it.answered } ?: return@LaunchedEffect
-        val release = updates.releases.firstOrNull { it.tag == install.tag } ?: return@LaunchedEffect
+        val release = updates.releases.firstOrNull { it.tag == install.tag }
+        if (release == null && updates.releases.isEmpty()) return@LaunchedEffect
         waiting = null
-        if (updater.canInstall()) updater.install(release)
+        when {
+            release == null -> Unit
+            updater.canInstall() -> updater.install(release)
+            else -> Toast.makeText(context, R.string.update_install_not_allowed, Toast.LENGTH_LONG).show()
+        }
+    }
+    // Back from Android's confirm screen with nothing installing, the page doesn't stay on Installing.
+    LifecycleResumeEffect(updater) {
+        updater.reconcile()
+        onPauseOrDispose { }
     }
     val uri = LocalUriHandler.current
     UpdatesPage(
