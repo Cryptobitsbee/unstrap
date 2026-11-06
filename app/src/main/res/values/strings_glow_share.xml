@@ -70,6 +70,8 @@
     <string name="glow_share_change_photo">Change photo</string>
     <!-- The pill under the card when it has no photo. -->
     <string name="glow_share_add_photo">Add a photo</string>
+    <!-- Shown under the card when the picked photo couldn't be read. One short sentence. -->
+    <string name="glow_share_photo_failed">Couldn\'t read that photo</string>
     <!-- Label before the choice of how a run's route shows on the card. One word, narrow. -->
     <string name="glow_share_route">Route</string>
     <!-- A choice for the route: not on the card. One short word. -->
