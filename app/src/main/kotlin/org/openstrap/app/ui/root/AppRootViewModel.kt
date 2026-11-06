@@ -254,9 +254,12 @@ class AppRootViewModel(
     suspend fun summaryRewards(start: Long): SummaryRewards? =
         catching { rewards.summary(start, workouts.value, goals.value.workoutsPerWeek) }.getOrNull()
 
-    /** The manual copy and auto sync write with these. The calorie ones are optional but asked for until granted. */
+    /**
+     * The manual copy and auto sync write with these. Only the needed permissions decide: the calorie ones are asked
+     * for in the same screen when the needed ones are missing, and never again by themselves.
+     */
     suspend fun healthConnectWrite(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
-        healthConnect.hasRequestedPermissions() -> HcState.Granted
+        healthConnect.hasPermissions() -> HcState.Granted
         else -> HcState.Needs(healthConnect.requestedPermissions)
     }
 

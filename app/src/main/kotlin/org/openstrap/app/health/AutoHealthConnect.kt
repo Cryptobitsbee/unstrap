@@ -141,11 +141,15 @@ class HealthConnectAutoSync(
         }
     }
 
-    /** The user turned auto sync on, with the permissions granted: on, and the last 30 days written at once. Returns the records written. */
+    /**
+     * The user turned auto sync on, with the permissions granted: the last 30 days are written at once, and only when
+     * that works is it turned on. A failed first write throws and leaves it off, for the caller to show. Returns the
+     * records written.
+     */
     suspend fun turnOn(): Int {
-        settings.setHealthConnectAuto(true)
         val now = System.currentTimeMillis() / 1000
         val n = exporter.export(now - AutoHealthConnect.MAX_S, now)
+        settings.setHealthConnectAuto(true)
         settings.setHealthConnectSynced(now)
         return n
     }

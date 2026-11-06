@@ -40,11 +40,18 @@ internal class PermissionGates(
     }
 }
 
+/** What waits on the location answer besides a workout: a name rather than a closure, so it can be saved. */
+private enum class GateAction {
+    /** Ready's "Turn on location": the Ready screen reads the phone's location again. */
+    REFRESH_READY,
+}
+
 /**
  * The permission gates. A workout waits as saveable data, so the answer still starts it after the activity was
- * recreated behind the dialog. A Strap page action waits in [pendingStrap], which outlives a fold. Location for a GPS
- * workout is asked only when GPS is on, and the workout starts either way (steps without it). Ready's "Turn on
- * location" hands over a closure that only refreshes Ready, so that one isn't saved.
+ * recreated behind the dialog. A Strap page action waits in [pendingStrap], which outlives a fold, and one Bluetooth
+ * answer runs both. Location for a GPS workout is asked only when GPS is on, and the workout starts either way (steps
+ * without it). Ready's "Turn on location" is a saved [GateAction] tag, with the closure that refreshes Ready kept
+ * beside it.
  */
 @Composable
 internal fun rememberPermissionGates(
@@ -66,7 +73,11 @@ internal fun rememberPermissionGates(
         pending = null
         pendingStrap.action = null
         when {
-            BlePermissions.granted(result) -> waiting?.let(start) ?: strapAction?.invoke()
+            // Whoever queued behind this one question gets the answer: the workout and the Strap page action both.
+            BlePermissions.granted(result) -> {
+                waiting?.let(start)
+                strapAction?.invoke()
+            }
             activity != null && BlePermissions.turnedDownForGood(activity, BlePermissions.bluetooth) -> blocked.value = true
             else -> Toast.makeText(context, bluetoothRequired, Toast.LENGTH_LONG).show()
         }
@@ -83,7 +94,11 @@ internal fun rememberPermissionGates(
             btLauncher.launch(BlePermissions.required())
         }
     }
-    var afterLocation by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // Which follow-up waits on the location answer is saved, so it survives a recreate. Ready's closure behind it only
+    // refreshes the Ready screen that asked, which a recreate replaces: the new Ready reads location itself when it
+    // shows and on every resume, so a lost closure leaves nothing undone.
+    var afterLocation by rememberSaveable { mutableStateOf<GateAction?>(null) }
+    var refreshReady by remember { mutableStateOf<(() -> Unit)?>(null) }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.none { it }) {
             Toast.makeText(context, locationDeclined, Toast.LENGTH_LONG).show()
@@ -93,12 +108,14 @@ internal fun rememberPermissionGates(
             pending = null
             withBluetooth(waiting)
         }
-        afterLocation?.invoke()
+        if (afterLocation == GateAction.REFRESH_READY) refreshReady?.invoke()
         afterLocation = null
+        refreshReady = null
     }
     val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     val requestLocation: (() -> Unit) -> Unit = { then ->
-        afterLocation = then
+        afterLocation = GateAction.REFRESH_READY
+        refreshReady = then
         locationLauncher.launch(locationPermissions)
     }
     val startPlan: (WorkoutPlan, SportSettings?) -> Unit = { plan, saved ->
