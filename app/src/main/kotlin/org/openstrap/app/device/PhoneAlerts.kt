@@ -292,12 +292,11 @@ class PhoneAlerts(
     /**
      * Reconnects a paired strap that isn't connected. Android can restart the process just to deliver a call or a
      * notification (or to bind [StrapNotificationListener]); this alert is lost, but the next one reaches the strap.
-     * A no-op while connected or connecting, while the user's Disconnect holds, and when the strap turned the key
-     * down (retrying can't help).
+     * A no-op while connected or connecting, while the user's Disconnect holds, and when retrying can't help (a key
+     * the strap turned down): [StrapController.backgroundConnect] checks those.
      */
     fun reconnectStrap() {
-        val c = strap.connection.value
-        if (c is ConnectionState.Connected || (c as? ConnectionState.Failed)?.keyRejected == true) return
+        if (strap.connection.value is ConnectionState.Connected) return
         if (!BlePermissions.granted(context)) return
         strap.backgroundConnect()
     }

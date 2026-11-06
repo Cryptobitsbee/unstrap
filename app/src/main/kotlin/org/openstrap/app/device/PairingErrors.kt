@@ -15,15 +15,19 @@ object PairingErrors {
     private const val BINDING_PROTECTED = 0x41
     private const val CLOUD_BIND_REQUIRED = 0x81
 
-    fun authFailure(e: AuthException, strings: Strings = Strings.app): ConnectionState.Failed = when (e.status) {
-        WRONG_KEY, CIPHERTEXT_MISMATCH, AES_FAILED ->
-            ConnectionState.Failed(strings.get(R.string.system_pairing_wrong_key), keyRejected = true)
-        NO_KEY -> ConnectionState.Failed(strings.get(R.string.system_pairing_no_key), keyRejected = true)
-        SIGNATURE_FAILED, BINDING_PROTECTED, CLOUD_BIND_REQUIRED ->
-            ConnectionState.Failed(strings.get(R.string.system_pairing_cloud_bind), keyRejected = true)
-        WORKOUT_RUNNING -> ConnectionState.Failed(strings.get(R.string.system_pairing_workout_running))
-        else -> ConnectionState.Failed(
-            strings.format(R.string.system_pairing_failed, e.message ?: strings.get(R.string.system_pairing_unknown_error)),
-        )
-    }
+    private val KEY_REJECTED = setOf(WRONG_KEY, CIPHERTEXT_MISMATCH, AES_FAILED, NO_KEY, SIGNATURE_FAILED, BINDING_PROTECTED, CLOUD_BIND_REQUIRED)
+
+    /** True when the strap turned the key down: the same key fails the same way until the user pairs again. */
+    fun keyRejected(status: Int): Boolean = status in KEY_REJECTED
+
+    fun authFailure(e: AuthException, strings: Strings = Strings.app): ConnectionState.Failed = ConnectionState.Failed(
+        when (e.status) {
+            WRONG_KEY, CIPHERTEXT_MISMATCH, AES_FAILED -> strings.get(R.string.system_pairing_wrong_key)
+            NO_KEY -> strings.get(R.string.system_pairing_no_key)
+            SIGNATURE_FAILED, BINDING_PROTECTED, CLOUD_BIND_REQUIRED -> strings.get(R.string.system_pairing_cloud_bind)
+            WORKOUT_RUNNING -> strings.get(R.string.system_pairing_workout_running)
+            else -> strings.format(R.string.system_pairing_failed, e.message ?: strings.get(R.string.system_pairing_unknown_error))
+        },
+        keyRejected = keyRejected(e.status),
+    )
 }

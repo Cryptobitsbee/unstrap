@@ -7,6 +7,7 @@ import org.openstrap.app.ble.GattUnusableException
 import org.openstrap.app.i18n.Strings
 import org.openstrap.protocol.ProtocolException
 import org.openstrap.protocol.ProtocolTimeoutException
+import org.openstrap.protocol.auth.AuthException
 
 /**
  * Turns a failed connect into what the Device page says. The raw exception text ("Disconnected (status 133)") goes to
@@ -24,8 +25,12 @@ object ConnectErrors {
         },
     )
 
-    /** True when trying again can't help until the user acts, so no reconnect is scheduled (audit E4). */
-    fun isFinal(e: Throwable): Boolean = e is GattUnusableException || e.isPermission()
+    /**
+     * True when trying again can't help until the user acts (grants the permission, pairs again), so no reconnect is
+     * scheduled (audit E4) and background triggers stop trying.
+     */
+    fun isFinal(e: Throwable): Boolean =
+        e is GattUnusableException || e.isPermission() || (e is AuthException && PairingErrors.keyRejected(e.status))
 
     private fun Throwable.isPermission(): Boolean = generateSequence(this) { it.cause }.any { it is SecurityException }
 }

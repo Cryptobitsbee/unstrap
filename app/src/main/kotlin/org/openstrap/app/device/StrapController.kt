@@ -107,7 +107,8 @@ interface StrapController {
 
     /**
      * [autoConnect] for reconnects nobody asked for on screen (companion presence, phone alerts, process start):
-     * a no-op while the user's Disconnect holds, which lasts until they connect again or open the app.
+     * a no-op while the user's Disconnect holds, which lasts until they connect again or open the app, and after a
+     * failure retrying can't fix ([ConnectErrors.isFinal], such as a key the strap turned down).
      */
     fun backgroundConnect()
     fun disconnect()

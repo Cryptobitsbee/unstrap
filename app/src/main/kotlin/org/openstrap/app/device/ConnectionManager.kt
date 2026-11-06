@@ -84,7 +84,11 @@ internal class ConnectionManager(
     /** True while the user wants the strap connected; cleared by [disconnect]. */
     @Volatile private var wantConnected = false
     private var retries = 0
-    /** Set when a connect failed in a way retrying can't fix (no permission, a bad address): presence events don't retry. */
+    /**
+     * Set when a connect failed in a way retrying can't fix ([ConnectErrors.isFinal]: no permission, a bad address, a
+     * key the strap turned down): presence events and Bluetooth coming back don't retry. Cleared by the next connect
+     * the user starts or the app coming to the front ([wantConnection]).
+     */
     @Volatile private var unusable = false
     @Volatile override var gatt: GattClient? = null
         private set
@@ -206,6 +210,11 @@ internal class ConnectionManager(
                 log("auth failed: ${e.message}")
                 connection.value = PairingErrors.authFailure(e)
                 close()
+                // Every presence event would otherwise run the handshake again, and fail the same way.
+                if (ConnectErrors.isFinal(e)) {
+                    unusable = true
+                    log("not retrying: the strap turned the key down")
+                }
             } catch (e: Exception) {
                 // Asks the coroutine, not the exception: a timeout is a failure to report, only a cancelled job unwinds.
                 if (!currentCoroutineContext().isActive) {
@@ -240,7 +249,7 @@ internal class ConnectionManager(
                     client.lost()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_ON -> onLane {
-                    if (!wantConnected || connection.value is ConnectionState.Connected || connectJob?.isActive == true) return@onLane
+                    if (!wantConnected || unusable || connection.value is ConnectionState.Connected || connectJob?.isActive == true) return@onLane
                     log("bluetooth back on, reconnecting")
                     retries = 0
                     reconnectJob?.cancel()
