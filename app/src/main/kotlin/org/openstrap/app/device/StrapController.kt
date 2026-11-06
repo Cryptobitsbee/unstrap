@@ -102,12 +102,17 @@ interface StrapController {
 
     fun connect()
 
-    /** Connect to the paired strap if not already connected; no-op when nothing is paired. */
+    /**
+     * The user opened the app or tapped Retry: clears their Disconnect and connects to the paired strap if not already
+     * connected or trying; no-op when nothing is paired. Anything the user didn't ask for on screen is [backgroundConnect].
+     */
     fun autoConnect()
 
     /**
-     * [autoConnect] for reconnects nobody asked for on screen (companion presence, phone alerts, process start):
-     * a no-op while the user's Disconnect holds, which lasts until they connect again or open the app.
+     * [autoConnect] for reconnects nobody asked for on screen (companion presence, phone alerts, process start, a
+     * workout starting, the widget's Sync now): a no-op while the user's Disconnect holds, which lasts until they
+     * connect again or open the app (this never clears it), and after a failure retrying can't fix
+     * ([ConnectErrors.isFinal], such as a key the strap turned down).
      */
     fun backgroundConnect()
     fun disconnect()

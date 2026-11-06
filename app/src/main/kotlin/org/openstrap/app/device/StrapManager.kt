@@ -90,9 +90,10 @@ class StrapManager(
                 connected(job, session)
             }
             override fun onLinkEnded() {
-                buzzer.endFind()
+                buzzer.linkEnded()
                 onWear(null)
                 live.onLinkEnded()
+                commands.forgetAlarmCaps()
             }
         },
     )
@@ -144,6 +145,10 @@ class StrapManager(
 
     /** The setup after auth, as named steps. Each failed step is logged and setup goes on without it. */
     private suspend fun afterAuth(client: GattClient, l: GattStrapLink, s: ChannelSession) {
+        // Facts of the last connection, so a step that fails here shows as unknown rather than as an old value.
+        battery = null
+        charging = false
+        firmware = null
         queryMtu(l, s)
         querySettingsVersion(s)
         val deviceInformation = queryDeviceInformation(s)
@@ -351,6 +356,18 @@ class StrapManager(
         // The app was stopped while it knew the wear state: close that interval now, as nothing is connected yet.
         val now = System.currentTimeMillis() / 1000
         wearEvents.post { if (dao.lastWearEvent()?.worn != null) dao.insertWearEvent(WearEventRow(now, null)) }
+        // Forget: the old strap's facts go with it, so the Device page can't show them for the next one.
+        scope.launch {
+            settings.pairedDevice.map { it != null }.distinctUntilChanged().collect { paired ->
+                if (paired) return@collect
+                info.value = null
+                todaySteps.value = null
+                battery = null
+                charging = false
+                firmware = null
+                commands.forgetAlarmCaps()
+            }
+        }
         // For the widgets' status line with the strap away: the battery and charging as last connected.
         scope.launch {
             connection.mapNotNull { c -> (c as? ConnectionState.Connected)?.let { it.batteryPercent?.let { b -> b to it.charging } } }
@@ -450,12 +467,16 @@ class StrapManager(
                 delay(WEAR_POLL_MS)
                 if (firmwareUpdating.value) continue
                 wearPolling = true
-                catching {
-                    val keys = listOf(SettingsCodec.KEY_WEAR_STATUS)
-                    val reply = commands.settingsQuery(SettingsCodec.GROUP_DEVICE_INFORMATION, keys, withOptions = false)
-                    SettingsCodec.parse(reply, commands.settingsProtocol?.version)?.let(SettingsCodec::wearStatus)?.let { onWear(it) }
-                }.onFailure { log("wear status poll failed: $it") }
-                wearPolling = false
+                try {
+                    catching {
+                        val keys = listOf(SettingsCodec.KEY_WEAR_STATUS)
+                        val reply = commands.settingsQuery(SettingsCodec.GROUP_DEVICE_INFORMATION, keys, withOptions = false)
+                        SettingsCodec.parse(reply, commands.settingsProtocol?.version)?.let(SettingsCodec::wearStatus)?.let { onWear(it) }
+                    }.onFailure { log("wear status poll failed: $it") }
+                } finally {
+                    // Also when the poll is cancelled with the connection, so a push isn't left unlogged.
+                    wearPolling = false
+                }
             }
         }
         info.value?.deviceInformation?.let(SettingsCodec::wearStatus)?.let { onWear(it) }
@@ -700,7 +721,8 @@ class StrapManager(
         try {
             // A failure is logged and handed on to the Firmware page. A cancellation is rethrown by catching as it came.
             catching {
-                if (live.isRunning) live.pause()
+                // The stream follows firmwareUpdating off on its own; this waits until the strap has been told.
+                live.pause()
                 val link = GattDfuLink(client)
                 if (!link.available) throw DfuException(-1, Strings.app.get(R.string.system_firmware_no_service))
                 // Bigger ATT packets make the transfer several times faster. Refused, it falls back to 20-byte writes.
