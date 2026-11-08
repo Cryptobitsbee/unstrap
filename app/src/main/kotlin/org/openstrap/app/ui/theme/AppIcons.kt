@@ -65,6 +65,8 @@ object AppIcons {
     val TapCaret: ImageVector by lazy { hugeicon("TapCaret", arrayOf("M9.00005 6C9.00005 6 15 10.4189 15 12C15 13.5812 9 18 9 18"), CARET, false, true) }
     val CaretUpFill: ImageVector by lazy { solid("CaretUpFill", "M5.5 15.5L12 8.5L18.5 15.5Z") }
     val CaretDownFill: ImageVector by lazy { solid("CaretDownFill", "M5.5 8.5L12 15.5L18.5 8.5Z") }
+    /** A lightning bolt, solid, for a strap that is charging. */
+    val Bolt: ImageVector by lazy { solid("BoltFill", "M13.5 2.5L5 13.5H11L10 21.5L19 10H13Z") }
     val User: ImageVector by lazy { line("User", "M20 21.0001C19.713 17.269 16.7289 14.3151 12.995 14.0662L12 13.9999C11.6446 14.0096 11.3134 14.0225 11.0008 14.0378C7.3 14.2192 4.28417 17.3057 4 21.0001", "M8 6.9999A4 4 0 1 0 16 6.9999A4 4 0 1 0 8 6.9999Z") }
     /** MinusSign and PlusSign, for a goal's step buttons. */
     val Minus: ImageVector by lazy { line("Minus", "M20 12L4 12") }
