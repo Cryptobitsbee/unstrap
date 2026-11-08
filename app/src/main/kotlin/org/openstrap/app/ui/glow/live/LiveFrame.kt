@@ -480,7 +480,8 @@ internal fun PageDots(current: Int, count: Int, position: Float? = null, onSelec
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
         repeat(count) { i ->
             Box(
-                Modifier.size(28.dp).clip(CircleShape).pressClickable({ onSelect(i) }, CircleShape),
+                // 48 dp wide to tap, as tall as before so the live screens keep their height.
+                Modifier.size(width = 48.dp, height = 28.dp).clip(CircleShape).pressClickable({ onSelect(i) }, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 val lit = if (position != null) (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f) else if (i == current) 1f else 0f
