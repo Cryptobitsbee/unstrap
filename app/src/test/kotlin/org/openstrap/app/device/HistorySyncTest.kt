@@ -57,6 +57,12 @@ private class SimulatedStrap : HistoryGatt {
     val starts = mutableListOf<Pair<Int, Long>>()
     var onEnable: suspend () -> Unit = {}
     var onStart: suspend (Int) -> Unit = {}
+    /** Answer every START with fast-recharge mode (status 51). */
+    var fastRecharge = false
+    /** A status to refuse a START of a type with, or null to serve it. */
+    var refuse: (Int) -> Int? = { null }
+    /** The ACK codes the phone sent, in order. */
+    val acks = mutableListOf<Int>()
     private var pending = ByteArray(0)
 
     override suspend fun enableNotifications(service: UUID, uuid: UUID) = onEnable()
@@ -78,6 +84,8 @@ private class SimulatedStrap : HistoryGatt {
                 ).toEpochSecond()
                 starts += type to since
                 onStart(type)
+                if (fastRecharge) return control(byteArrayOf(0x10, 1, 51))
+                refuse(type)?.let { return control(byteArrayOf(0x10, 1, it.toByte())) }
                 val chunk = records[type].orEmpty().filter { it.first >= since }.take(perChunk[type] ?: 2)
                 pending = chunk.fold(ByteArray(0)) { acc, r -> acc + r.second }
                 val header = Instant.ofEpochSecond(chunk.firstOrNull()?.first ?: since).atZone(ZoneOffset.UTC)
@@ -87,9 +95,12 @@ private class SimulatedStrap : HistoryGatt {
             }
             FetchCodec.OP_TRANSFER -> {
                 pending.toList().chunked(19).forEachIndexed { i, c -> out.emit(Notification(HISTORY_DATA, byteArrayOf(i.toByte()) + c.toByteArray())) }
-                control(byteArrayOf(0x10, 2, 1))
+                control(ByteWriter().u8(0x10).u8(2).u8(1).u32(org.openstrap.protocol.crypto.crc32(pending)).toByteArray())
             }
-            FetchCodec.OP_ACK -> control(byteArrayOf(0x10, 3, 1))
+            FetchCodec.OP_ACK -> {
+                acks += value.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                control(byteArrayOf(0x10, 3, 1))
+            }
         }
     }
 
@@ -207,9 +218,9 @@ class HistorySyncTest {
 
         assertEquals(emptyList<Any>(), table("SELECT * FROM resting_hr"))
         assertEquals(null, cursors.values[key(HistoryDataType.PAI)])
-        // The other types went on.
+        // The other types went on, and the sync ends with an error, as Zepp's does when a job failed.
         assertEquals(3, table("SELECT * FROM hrv").size)
-        assertTrue(state.value is SyncState.Done)
+        assertEquals(SyncState.Failed("Sync failed"), state.value)
     }
 
     @Test fun `a kill after the commit and before the cursor stores the chunk again without duplicates`() = runTest {
@@ -262,7 +273,8 @@ class HistorySyncTest {
         strap.onStart = { type -> if (type == HistoryDataType.HRV_RMSSD.code) withTimeout(10) { awaitCancellation() } }
         runSync()
 
-        assertTrue("${state.value}", state.value is SyncState.Done)
+        // The next types still run; the sync ends with an error, as Zepp's does when a job failed.
+        assertEquals(SyncState.Failed("Sync failed"), state.value)
         assertEquals(emptyList<Any>(), table("SELECT * FROM hrv"))
         assertEquals(1, table("SELECT * FROM pai").size)
     }
@@ -275,13 +287,28 @@ class HistorySyncTest {
         assertEquals(SyncState.Failed("The Bluetooth connection to the strap dropped."), state.value)
     }
 
-    @Test fun `fast-charge mode stops the sync and the log keeps the strap's reason`() = runTest {
+    @Test fun `a refused START is acknowledged with its status and asked again with the same cursor, three times`() = runTest {
         seedStrap()
-        strap.onStart = { throw org.openstrap.protocol.history.FastRechargeModeException() }
+        strap.refuse = { type -> if (type == HistoryDataType.HRV_RMSSD.code) 5 else null }
+        runSync()
+        val hrv = strap.starts.filter { it.first == HistoryDataType.HRV_RMSSD.code }
+        assertEquals(3, hrv.size)
+        assertEquals(1, hrv.map { it.second }.distinct().size)
+        assertEquals(3, strap.acks.count { it == 5 })
+        assertEquals(SyncState.Failed("Sync failed"), state.value)
+        // The types after it still ran.
+        assertEquals(1, table("SELECT * FROM pai").size)
+    }
+
+    @Test fun `fast-charge mode is acknowledged and starts nothing more`() = runTest {
+        seedStrap()
+        strap.fastRecharge = true
         runSync()
 
         assertEquals(SyncState.Failed("The strap is in fast-charge mode. Sync again once it's off."), state.value)
-        assertTrue(log.toString(), log.any { it.startsWith("history: strap is in fast-charge mode") && "The strap is in fast-charge mode" in it })
+        // One START, closed with 03 33 as Zepp does, and no other type asked while the mode lasts.
+        assertEquals(1, strap.starts.size)
+        assertEquals(listOf(0x33), strap.acks)
     }
 
     @Test fun `any failure on one type skips that type only, not just an Exception`() = runTest {
@@ -291,7 +318,7 @@ class HistorySyncTest {
         val thrown = runCatching { runSync() }.exceptionOrNull()
 
         assertEquals(null, thrown)
-        assertTrue("${state.value}", state.value is SyncState.Done)
+        assertEquals(SyncState.Failed("Sync failed"), state.value)
         assertEquals(1, table("SELECT * FROM pai").size)
         assertTrue(log.toString(), log.any { it.startsWith("history HRV_RMSSD") && "no parser" in it })
     }

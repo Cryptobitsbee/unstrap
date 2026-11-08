@@ -294,8 +294,10 @@ class FeatureGatedPlanTest {
         val advertised = setOf(1, 38, 70, 72, 73, 74)
         // No bitmap: today's defaults.
         assertEquals(advertised, codes(advertised, null))
-        // The advertised list wins over clear bits, which are only logged.
-        assertEquals(advertised, codes(advertised, features(21, 68)))
+        // A clear bit skips an advertised type below 75, as Zepp's gates do; the map alone gates 75 to 96.
+        assertEquals(setOf(1, 38, 74), codes(advertised, features(21, 68)))
+        assertEquals(setOf(1, 76), codes(setOf(1, 76), features(21, 68)))
+        assertFalse(76 in codes(null, features(21, 68)))
         assertEquals(listOf(70, 72, 73), HistoryTypeSpecs.featureDisagreements(advertised, features(21, 68)).sorted())
         assertTrue(HistoryTypeSpecs.featureDisagreements(advertised, features(21, 62, 65, 66, 68)).isEmpty())
         // No advertised list: a set bit brings in an IF_ADVERTISED type, a clear bit drops an EXPECTED one.

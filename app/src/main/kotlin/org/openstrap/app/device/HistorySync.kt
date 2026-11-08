@@ -50,10 +50,10 @@ import org.openstrap.protocol.history.SleepRespiratoryEvent
 import org.openstrap.protocol.history.SleepSpO2Sample
 import org.openstrap.protocol.history.SpO2OsaEvent
 import org.openstrap.protocol.history.TodayActivityExtended
-import org.openstrap.protocol.history.FastRechargeModeException
 import org.openstrap.protocol.history.FetchCodec
 import org.openstrap.protocol.history.GdspClient
 import org.openstrap.protocol.history.GdspFetch
+import org.openstrap.protocol.history.PreviousChunk
 import org.openstrap.protocol.history.GdspMessage
 import org.openstrap.protocol.history.GdspStatus
 import org.openstrap.protocol.history.WorkoutFetch
@@ -135,11 +135,7 @@ class HistorySync internal constructor(
         // catching gives back a CancellationException only once the sync is cancelled: a timeout is one too, and fails it.
         try {
             catching { sync(only) }.onFailure { e ->
-                if (e is FastRechargeModeException) {
-                    // Zepp ends the sync job at once in this mode (xyk.java:66-70), and the data waits on the strap.
-                    log("history: strap is in fast-charge mode, sync stopped ($e)")
-                    state.value = SyncState.Failed(Strings.app.get(R.string.system_sync_fast_charge))
-                } else {
+                run {
                     log("history failed: $e")
                     // A wrapped system error's message is just its class name (android.os.DeadObjectException), not for
                     // the card. Whatever a call on a dropped link threw (a missing characteristic, a closed op), the cause
@@ -165,23 +161,28 @@ class HistorySync internal constructor(
         if (!useChannel) gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_CONTROL)
         log("history: control via ${if (useChannel) "channel 0x004B" else "HUAMI(0004)"}")
 
-        val version = client.queryVersion()
+        val version = versionFor(session)
         val advertised = version?.supportedTypes()
         log("history version ${version?.version}, strap offers types ${advertised?.sorted()}" + only?.let { ", syncing $it" }.orEmpty())
 
         HistoryTypeSpecs.featureDisagreements(advertised, session.features).takeIf { it.isNotEmpty() }
-            ?.let { log("history: feature bits clear for advertised types $it; fetching them anyway") }
+            ?.let { log("history: feature bits clear for advertised types $it, skipped as Zepp does") }
         val plan = HistoryTypeSpecs.plan(advertised, session.features).filter { it.parser != null && (only == null || it.code in only) }
+        // Zepp runs every job and counts the ones that failed; the sync then ends with an error.
+        var failedTypes = 0
         plan.forEachIndexed { i, spec ->
             val step = Strings.app.format(R.string.system_sync_step, syncKindName(spec.type), i + 1, plan.size)
             state.value = SyncState.Running(step, i.toFloat() / plan.size)
-            catching { if (spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(spec) else syncType(spec) }.onFailure { e ->
+            val ok = catching {
+                if (spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(spec) else syncType(spec)
+            }.getOrElse { e ->
                 // A timeout is a CancellationException too, but catching gives back only a cancelled sync's (audit C2).
-                if (e is FastRechargeModeException) throw e
                 // The link is gone: every later type would fail the same way, and the sync must not end as Done.
                 if (!gatt.connected.value) throw e
                 log("history ${spec.type}: $e")
+                false
             }
+            if (!ok) failedTypes++
         }
         if (only == null && session.services.has(Endpoints.READINESS)) catching { syncReadiness() }.onFailure { log("readiness: $it") }
         // A session the strap ran alongside a phone workout has just come in: its figures replace the model's.
@@ -200,8 +201,29 @@ class HistorySync internal constructor(
         catching { org.openstrap.app.data.SleepSource(dao).purgeExpired(System.currentTimeMillis() / 1000) }
             .onSuccess { if (it > 0) log("history: removed $it sleep sessions deleted over a week ago") }
             .onFailure { log("deleted sleep: $it") }
-        state.value = SyncState.Done(System.currentTimeMillis() / 1000)
+        state.value = when {
+            fastRecharge -> SyncState.Failed(Strings.app.get(R.string.system_sync_fast_charge))
+            failedTypes > 0 -> {
+                log("history: $failedTypes types failed")
+                SyncState.Failed(Strings.app.get(R.string.system_sync_failed))
+            }
+            else -> SyncState.Done(System.currentTimeMillis() / 1000)
+        }
     }
+
+    /**
+     * The GDSP version reply, asked once per connection as Zepp does (`vwi.b`): kept only when it succeeded, so a
+     * failed query is asked again at the next sync.
+     */
+    private suspend fun versionFor(s: ChannelSession): GdspMessage.VersionReply? {
+        synchronized(versions) { versions[s] }?.let { return it }
+        val reply = client.queryVersion()?.takeIf { it.isSuccess }
+        if (reply != null) synchronized(versions) { versions[s] = reply }
+        return reply
+    }
+
+    /** The strap answered a START with fast-recharge mode: Zepp then starts no job until it ends (cached state). */
+    private var fastRecharge = false
 
     /**
      * Debug aid: fetches every type the strap offers since [fromEpoch] and writes each chunk's payload to
@@ -218,7 +240,7 @@ class HistorySync internal constructor(
         try {
             gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_DATA)
             if (!useChannel) gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_CONTROL)
-            val version = client.queryVersion()
+            val version = versionFor(session)
             val codes = only?.sorted() ?: version?.supportedTypes()?.sorted().orEmpty()
             log("dump: types $codes (strap offers ${version?.supportedTypes()?.sorted()})")
             for (code in codes) {
@@ -228,11 +250,9 @@ class HistorySync internal constructor(
                     repeat(DUMP_CHUNKS) {
                         val chunk = when (val f = client.fetch(code, cursor, zone)) {
                             is GdspFetch.Chunk -> f
-                            is GdspFetch.Refused -> { log("dump $code: start ${f.status}"); return@catching }
                             is GdspFetch.Failed -> { log("dump $code: ${f.reason}"); return@catching }
                             GdspFetch.Empty -> { log("dump $code: empty"); return@catching }
                         }
-                        client.finish()
                         val header = chunk.headerTime
                         val payload = chunk.payload
                         java.io.File(dir, "${code}_$header.bin").writeBytes(payload)
@@ -374,7 +394,10 @@ class HistorySync internal constructor(
     private suspend fun discardedPhoneWorkout(row: Workout): Boolean =
         dao.dismissedWorkoutsAll().any { Workouts.sameWorkout(row.start..row.end, it.start..it.end) }
 
-    private suspend fun syncType(spec: HistoryTypeSpec) {
+    /** One type, as Zepp's `l59` loop. False when it failed with nothing fetched, which fails the sync. */
+    // Each return ends the type for a reason of its own.
+    @Suppress("ReturnCount", "CyclomaticComplexMethod", "LongMethod")
+    private suspend fun syncType(spec: HistoryTypeSpec): Boolean {
         val key = "gdsp_${spec.code}"
         var cursor = cursors.get(key) ?: firstCursor(spec.type, System.currentTimeMillis() / 1000)
         // The strap keeps updating a day's max exercise HR, so Zepp re-fetches it from the start of the day on every
@@ -386,28 +409,39 @@ class HistorySync internal constructor(
             log("history: catching up minutes from ${Instant.ofEpochSecond(cursor)}, no nights made from them")
             cursors.set(MINUTES_CHECKED_KEY, now)
         }
-        repeat(MAX_CHUNKS_PER_TYPE) {
-            val chunk = when (val f = client.fetch(spec.code, cursor, zone)) {
+        // Zepp's `l59.f`: up to 3 failed exchanges per type in a sync (1 for 79 and 96), each repeating the same cursor,
+        // and no cap on chunks while the cursor moves on. The ACK has gone out before anything here is parsed.
+        var retries = if (spec.code in SINGLE_TRY) 1 else RETRIES
+        var previous: PreviousChunk? = null
+        var chunks = 0
+        while (true) {
+            check(gatt.connected.value) { Strings.app.get(R.string.system_sync_link_dropped) }
+            if (fastRecharge) return chunks > 0
+            val chunk = when (val f = client.fetch(spec.code, cursor, zone, previous)) {
                 is GdspFetch.Chunk -> f
-                is GdspFetch.Refused -> { log("history ${spec.type}: start refused (${f.status})"); return }
-                is GdspFetch.Failed -> { log("history ${spec.type}: ${f.reason}"); return }
-                GdspFetch.Empty -> return
+                GdspFetch.Empty -> return true
+                is GdspFetch.Failed -> {
+                    log("history ${spec.type}: ${f.reason}")
+                    if (f.fastRecharge) fastRecharge = true
+                    if (f.cyclic || --retries <= 0 || fastRecharge) return chunks > 0
+                    continue
+                }
             }
+            chunks++
             val headerTime = chunk.headerTime
             val payload = chunk.payload
             // The size field counts records, not bytes (activity: size 4 = four 8-byte minutes).
             val unit = chunk.unit ?: run {
-                log("history ${spec.type}: got ${payload.size} bytes for size ${chunk.sizeField}, discarding")
-                finish(GdspStatus.DATA_SIZE_MISMATCH)
-                return
+                log("history ${spec.type}: got ${payload.size} bytes for size ${chunk.sizeField}, not read")
+                return true
             }
             log("history ${spec.type}: ${payload.size} bytes (${chunk.sizeField}×$unit) from ${Instant.ofEpochSecond(headerTime)}: ${payload.copyOf(minOf(32, payload.size)).toHex()}")
 
             when (val result = spec.parser!!.parse(payload, ParseContext(headerTime, activityRecordSize = recordSize(spec.code, payload, chunk.sizeField)))) {
+                // Zepp parses after the ACK and tells the strap nothing of a parse failure.
                 is ParseResult.Failure -> {
                     log("history ${spec.type}: parse failed: ${result.reason}")
-                    finish(GdspStatus.CONTENT_PARSE_ERROR)
-                    return
+                    return true
                 }
                 is ParseResult.Success -> {
                     // Drop records with impossible times (stale buffer slots, data from before the clock was set), and
@@ -420,15 +454,13 @@ class HistorySync internal constructor(
                         "history ${spec.type}: ${kept.size} records" +
                             if (dropped > 0) " ($dropped unfinished or with impossible times dropped)" else "",
                     )
-                    // The chunk's rows commit together, before the ACK and the cursor: a kill before the commit keeps
-                    // none of them and the cursor where it was, a kill after it fetches the chunk again, and storing
-                    // it again replaces the same rows.
+                    // The chunk's rows commit together, before the cursor: a kill before the commit keeps none of them
+                    // and the cursor where it was, and storing the chunk again replaces the same rows.
                     dao.inTransaction { store(kept) }
-                    // Only acknowledge once the data is safely in the database.
-                    finish()
                     val next = nextCursor(spec.type, headerTime, records, parsedNext, kept, now)
                     if (next != null && next > cursor) cursors.set(key, next)
-                    if (!HistoryTypeSpecs.shouldContinue(spec, cursor, next)) return
+                    if (!HistoryTypeSpecs.shouldContinue(spec, cursor, next)) return true
+                    previous = PreviousChunk(cursor, headerTime)
                     cursor = next!!
                 }
             }
@@ -464,20 +496,27 @@ class HistorySync internal constructor(
         if (rows.isNotEmpty()) dao.insertStrapReadiness(rows)
     }
 
-    private suspend fun finish(status: GdspStatus = GdspStatus.SUCCESS) = client.finish(status)
-
     /**
      * Workouts, one per round: the summary, then its detail from the same cursor (04 §3.16). The cursor only
      * moves once both are stored, so a workout whose detail transfer broke is fetched again next time.
      */
-    private suspend fun syncWorkouts(spec: HistoryTypeSpec) {
+    // Each return ends the loop for a reason of its own.
+    @Suppress("ReturnCount")
+    private suspend fun syncWorkouts(spec: HistoryTypeSpec): Boolean {
         val key = "gdsp_${spec.code}"
         var cursor = cursors.get(key) ?: (System.currentTimeMillis() / 1000 - WORKOUT_LOOKBACK)
-        repeat(MAX_CHUNKS_PER_TYPE) {
+        var fetched = 0
+        while (true) {
+            if (fastRecharge) return fetched > 0
             when (val w = client.fetchWorkout(cursor, zone)) {
-                WorkoutFetch.None -> return
-                is WorkoutFetch.Failed -> { log("history workout: ${w.reason}"); return }
+                WorkoutFetch.None -> return true
+                is WorkoutFetch.Failed -> {
+                    log("history workout: ${w.reason}")
+                    if (w.fastRecharge) fastRecharge = true
+                    return fetched > 0
+                }
                 is WorkoutFetch.Workout -> {
+                    fetched++
                     val now = System.currentTimeMillis() / 1000
                     val deleted = dao.deletedWorkoutsAll().any { it.start == w.summary.trackId }
                     val discarded = !deleted && discardedPhoneWorkout(workoutRow(w.summary))
@@ -500,9 +539,9 @@ class HistorySync internal constructor(
                     } else {
                         log("history workout with impossible time ${w.summary.timestamp} dropped")
                     }
-                    if (w.retryDetail) { log("history workout: detail failed, will retry next sync"); return }
+                    if (w.retryDetail) { log("history workout: detail failed, will retry next sync"); return true }
                     val next = w.nextCursor.coerceAtMost(now)
-                    if (next <= cursor) return
+                    if (next <= cursor) return true
                     cursors.set(key, next)
                     cursor = next
                 }
@@ -764,7 +803,11 @@ class HistorySync internal constructor(
         /** 2024-01-01: anything older comes from a strap whose clock was never set. */
         private const val MIN_VALID_EPOCH = 1_704_067_200L
         private const val FUTURE_SLACK = 120L
-        private const val MAX_CHUNKS_PER_TYPE = 50
+        /** Zepp's `xr3.d()`: failed exchanges allowed per type in one sync, 1 for types 79 and 96. */
+        private const val RETRIES = 3
+        private val SINGLE_TRY = setOf(79, 96)
+        /** The version reply per connection (Zepp clears its copy on disconnect; a gone session is never asked again). */
+        private val versions = java.util.WeakHashMap<ChannelSession, GdspMessage.VersionReply>()
         private const val DUMP_CHUNKS = 5
 
         /**
