@@ -81,6 +81,7 @@ import org.openstrap.protocol.history.SpO2Reading
 import org.openstrap.protocol.history.SpotHeartRate
 import org.openstrap.protocol.services.Endpoints
 import org.openstrap.protocol.services.ReadinessCodec
+import org.openstrap.protocol.services.PaiCodec
 import org.openstrap.protocol.u8
 import org.openstrap.protocol.toHex
 import java.time.Instant
@@ -120,6 +121,7 @@ class HistorySync internal constructor(
     private val control = Channel<GdspMessage>(Channel.UNLIMITED)
     private val data = Channel<ByteArray>(Channel.UNLIMITED)
     private val client = GdspClient(::send, control, data, log)
+    private val channelJobs = ZeppChannelJobs(session, dao, cursors, zone, log) { dao.inTransaction { store(it) } }
 
     /** Syncs every type, or only the codes in [only] (an on-demand sync after a data-available push). */
     suspend fun run(only: Set<Int>? = null) = coroutineScope {
@@ -162,33 +164,44 @@ class HistorySync internal constructor(
         if (!useChannel) gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_CONTROL)
         log("history: control via ${if (useChannel) "channel 0x004B" else "HUAMI(0004)"}")
 
+        // Zepp's loader and job gates, before the first job: the sleep module once per strap, then the PAI module's,
+        // the GDSP and the readiness module's versions once per connection.
+        val sleepPlan = channelJobs.sleepPlanSupported()
+        val paiVersion = channelJobs.paiVersion()
         val version = versionFor(session)
         val advertised = version?.supportedTypes()
+        val readinessVersion = channelJobs.readinessVersion()
         log("history version ${version?.version}, strap offers types ${advertised?.sorted()}" + only?.let { ", syncing $it" }.orEmpty())
 
-        HistoryTypeSpecs.featureDisagreements(advertised, session.features).takeIf { it.isNotEmpty() }
-            ?.let { log("history: feature bits clear for advertised types $it, skipped as Zepp does") }
-        val plan = withBreathEventsAfterBreathRate(
-            HistoryTypeSpecs.plan(advertised, session.features).filter { it.parser != null && (only == null || it.code in only) },
+        val gates = ZeppJobs.Gates(
+            advertised, session.features, session.services::has, readinessVersion, paiVersion, sleepPlan, statisticsDue(),
         )
+        val all = ZeppJobs.list(gates)
+        val jobs = if (only == null) all else ZeppJobs.only(all, only)
+        log("history jobs: ${jobs.joinToString { jobLabel(it) }}")
         // Zepp runs every job and counts the ones that failed; the sync then ends with an error.
         var failedTypes = 0
-        plan.forEachIndexed { i, spec ->
-            val step = Strings.app.format(R.string.system_sync_step, syncKindName(spec.type), i + 1, plan.size)
-            state.value = SyncState.Running(step, i.toFloat() / plan.size)
+        jobs.forEachIndexed { i, job ->
+            val step = Strings.app.format(R.string.system_sync_step, jobName(job), i + 1, jobs.size)
+            state.value = SyncState.Running(step, i.toFloat() / jobs.size)
             val ok = catching {
-                if (spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(spec) else syncType(spec)
+                when (job) {
+                    is ZeppJob.Gdsp ->
+                        if (job.spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(job.spec) else syncType(job.spec)
+                    is ZeppJob.Readiness -> channelJobs.readiness(job.op)
+                    ZeppJob.Pai -> channelJobs.pai()
+                }
             }.getOrElse { e ->
                 // A timeout is a CancellationException too, but catching gives back only a cancelled sync's (audit C2).
                 // The link is gone: every later type would fail the same way, and the sync must not end as Done.
                 if (!gatt.connected.value) throw e
-                log("history ${spec.type}: $e")
+                log("history ${jobLabel(job)}: $e")
                 false
             }
             // Zepp ignores the breath events' result (`stk`).
-            if (!ok && spec.type != HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT) failedTypes++
+            val ignored = job is ZeppJob.Gdsp && job.spec.type == HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT
+            if (!ok && !ignored) failedTypes++
         }
-        if (only == null && session.services.has(Endpoints.READINESS)) catching { syncReadiness() }.onFailure { log("readiness: $it") }
         // A session the strap ran alongside a phone workout has just come in: its figures replace the model's.
         catching {
             org.openstrap.app.data.WorkoutEffectEngine(dao)
@@ -353,13 +366,18 @@ class HistorySync internal constructor(
     }
 
     /** A type's stored cursor as Zepp reads it: corrected, or its default when there is none ([ZeppCursors]). */
-    private suspend fun read(type: HistoryDataType, now: Long): Long =
-        cursors.get(keyOf(type))?.let { ZeppCursors.onRead(it, now) } ?: ZeppCursors.default(now, zone)
+    private suspend fun read(type: HistoryDataType, now: Long): Long = ZeppCursors.read(cursors, keyOf(type), now, zone)
 
-    private suspend fun startOf(type: HistoryDataType, now: Long): Long {
-        val stored = HashMap<HistoryDataType, Long>()
-        for (t in ZEPP_READS[type] ?: listOf(type)) stored[t] = read(t, now)
-        return ZeppCursors.start(type, now, zone) { stored.getValue(it) }
+    private suspend fun startOf(type: HistoryDataType, now: Long): Long = when {
+        // Statistics ask from now. A sleep plan with none stored falls back to the bind time, as Zepp's job does
+        // with no cursor: the first minute stored stands in for it.
+        type == HistoryDataType.DEVICE_STATISTIC -> now
+        type == HistoryDataType.SLEEP_PLAN && cursors.get(keyOf(type)) == null -> dao.firstActivityAfter(MIN_VALID_EPOCH) ?: now
+        else -> {
+            val stored = HashMap<HistoryDataType, Long>()
+            for (t in ZEPP_READS[type] ?: listOf(type)) stored[t] = read(t, now)
+            ZeppCursors.start(type, now, zone) { stored.getValue(it) }
+        }
     }
 
     private suspend fun save(type: HistoryDataType, value: Long, now: Long) =
@@ -436,6 +454,7 @@ class HistorySync internal constructor(
             cursor = following ?: break@loop
         }
         if (got.isNotEmpty()) dataOut(spec.type, got, next, start)
+        if (spec.type == HistoryDataType.DEVICE_STATISTIC && ok) save(spec.type, now, now)
         return ok
     }
 
@@ -460,20 +479,23 @@ class HistorySync internal constructor(
         save(type, saved, now)
     }
 
-    /** Saves the strap's latest readiness score; it keeps no history, so this runs every sync. */
-    private suspend fun syncReadiness() {
-        val since = System.currentTimeMillis() / 1000 - DEFAULT_LOOKBACK
-        val reply = session.request(Endpoints.READINESS, ReadinessCodec.scoreRequest(since), 8_000) { it.isNotEmpty() && it.u8(0) == ReadinessCodec.SCORE + 1 }
-        val scores = ReadinessCodec.parseScores(reply).orEmpty()
-        log("readiness: ${scores.joinToString { "${Instant.ofEpochSecond(it.day)} ${it.score}" }.ifEmpty { "none" }}")
-        // The strap's day is its local midnight, taken as its date in the phone's zone, as the strap keeps the phone's.
-        val rows = scores.filter { it.score != null }.map {
-            StrapReadinessRow(
-                DayKey.fromLegacy(it.day, zone), it.updatedAt, it.score, it.hrvScore, it.restingHrScore, it.skinTemperatureScore,
-                it.breathingScore, it.sleepHrv, it.sleepRestingHr, it.algorithmVersion,
-            )
-        }
-        if (rows.isNotEmpty()) dao.insertStrapReadiness(rows)
+    /** Device statistics (44) run at most once a day. */
+    private suspend fun statisticsDue(): Boolean {
+        val last = cursors.get(keyOf(HistoryDataType.DEVICE_STATISTIC)) ?: return true
+        return Days.start(last, zone) < Days.start(System.currentTimeMillis() / 1000, zone)
+    }
+
+    /** A job as the log names it: the GDSP type, or the channel endpoint and opcode. */
+    private fun jobLabel(job: ZeppJob) = when (job) {
+        is ZeppJob.Gdsp -> job.spec.type.name
+        is ZeppJob.Readiness -> "%04x %02x".format(java.util.Locale.ROOT, Endpoints.READINESS, job.op)
+        ZeppJob.Pai -> "%04x %02x".format(java.util.Locale.ROOT, Endpoints.PAI, PaiCodec.QUERY)
+    }
+
+    private fun jobName(job: ZeppJob) = when (job) {
+        is ZeppJob.Gdsp -> syncKindName(job.spec.type)
+        is ZeppJob.Readiness -> Strings.app.get(R.string.system_sync_kind_other)
+        ZeppJob.Pai -> syncKindName(HistoryDataType.PAI)
     }
 
     /**
@@ -622,6 +644,7 @@ class HistorySync internal constructor(
                 r.steps, r.calories, r.distanceCm,
             )
             is SleepRespiratoryEvent -> raw += RawRecord(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT.code, r.timestamp, r.raw)
+            is org.openstrap.protocol.history.RawHistoryRecord -> raw += RawRecord(r.code, r.timestamp, r.raw)
             else -> Unit
         }
         val partial = mutableListOf<HeartRateSample>()
@@ -733,7 +756,6 @@ class HistorySync internal constructor(
     companion object {
         private val HISTORY_CONTROL = java.util.UUID.fromString("00000004-0000-3512-2118-0009af100700")
         private val HISTORY_DATA = java.util.UUID.fromString("00000005-0000-3512-2118-0009af100700")
-        private const val DEFAULT_LOOKBACK = 2L * 24 * 3600
         /** How far back a strap session's effects may replace a phone workout's model figures. */
         private const val WORKOUT_LOOKBACK = 30L * 24 * 3600
 
@@ -743,7 +765,8 @@ class HistorySync internal constructor(
         /** Set once the stored cursors were moved to Zepp's rules ([migrateCursorsOnce]). */
         internal const val CURSORS_ZEPP_KEY = "cursors_zepp_10105"
 
-        private fun keyOf(type: HistoryDataType) = "gdsp_${type.code}"
+
+        internal fun keyOf(type: HistoryDataType) = "gdsp_${type.code}"
 
         /** The stored cursors a type's start is made from ([ZeppCursors.start]). */
         private val ZEPP_READS: Map<HistoryDataType, List<HistoryDataType>> = mapOf(
@@ -753,15 +776,6 @@ class HistorySync internal constructor(
             HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT to listOf(HistoryDataType.SLEEP_BREATH_RATE),
             HistoryDataType.SPORT_DETAIL to listOf(HistoryDataType.SPORT_SUMMARY),
         )
-
-        /** Breath events (57) run right after breath rate (56), as Zepp queues them back to back (`stk`). */
-        internal fun withBreathEventsAfterBreathRate(plan: List<HistoryTypeSpec>): List<HistoryTypeSpec> {
-            val events = plan.firstOrNull { it.type == HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT }
-            val rate = plan.indexOfFirst { it.type == HistoryDataType.SLEEP_BREATH_RATE }
-            if (events == null || rate < 0) return plan
-            val rest = plan - events
-            return rest.subList(0, rate + 1) + events + rest.subList(rate + 1, rest.size)
-        }
 
         /** 2024-01-01: anything older comes from a strap whose clock was never set. */
         private const val MIN_VALID_EPOCH = 1_704_067_200L
@@ -845,7 +859,7 @@ internal fun syncKindName(t: HistoryDataType, strings: Strings = Strings.app): S
 /** Each named kind of data and the strap types it covers. */
 private val SYNC_KIND_NAMES: Map<HistoryDataType, Int> = listOf(
     R.string.system_sync_kind_activity to listOf(HistoryDataType.ACTIVITY, HistoryDataType.TODAY_ACTIVITY_EXTENDED),
-    R.string.system_sync_kind_sleep to listOf(HistoryDataType.SLEEP_RESULT),
+    R.string.system_sync_kind_sleep to listOf(HistoryDataType.SLEEP_RESULT, HistoryDataType.SLEEP_PLAN),
     R.string.system_sync_kind_hrv to listOf(HistoryDataType.HRV_RMSSD, HistoryDataType.HRV_SDNN),
     R.string.system_sync_kind_resting_hr to listOf(HistoryDataType.REST_HR, HistoryDataType.RESTING_HEART_RATE),
     R.string.system_sync_kind_heart_rate to listOf(HistoryDataType.HEART_RATE_MANUAL, HistoryDataType.SEC_HR, HistoryDataType.SEC_HR_V2),
@@ -863,5 +877,6 @@ private val SYNC_KIND_NAMES: Map<HistoryDataType, Int> = listOf(
         HistoryDataType.BODY_TEMPERATURE_ALL_DAY, HistoryDataType.BODY_TEMPERATURE_SINGLE, HistoryDataType.BODY_TEMPERATURE_80S,
         HistoryDataType.TEMPERATURE_LEGACY,
     ),
+    R.string.system_sync_kind_strap_stats to listOf(HistoryDataType.DEVICE_STATISTIC),
     R.string.system_sync_kind_workouts to listOf(HistoryDataType.SPORT_SUMMARY, HistoryDataType.SPORT_DETAIL, HistoryDataType.SPORT_EFFECT),
 ).flatMap { (id, types) -> types.map { it to id } }.toMap()

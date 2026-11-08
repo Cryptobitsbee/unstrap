@@ -42,6 +42,39 @@ object ReadinessCodec {
     /** The strap answers with its latest score whatever [since] is (seen on fw 3.25.0.3). */
     fun scoreRequest(since: Long): ByteArray = ByteWriter().u8(SCORE).u32(since).toByteArray()
 
+    /** Readiness data since (`06`, Zepp's ReadinessDataJob). */
+    const val DATA = 0x06
+
+    /** Stress threshold records since (`0C`, Zepp's StressThresholdJob, readiness version 3 or more). */
+    const val STRESS_THRESHOLD = 0x0C
+
+    /** `<op> since u32`, the request of every readiness job. */
+    fun request(op: Int, since: Long): ByteArray = ByteWriter().u8(op).u32(since).toByteArray()
+
+    /** `01 status version ...` (table V): the version is byte 2. */
+    fun parseVersion(reply: ByteArray): Int? = if (reply.size >= RECORDS_AT && reply.u8(0) == VERSION + 1) reply.u8(2) else null
+
+    /**
+     * `<op+1> status count` then count records of equal size (`isk`), each starting with its `u32` time, kept whole as
+     * (time, bytes). Status 2 is no data. Null if not a reply to [op] or the status is an error.
+     */
+    fun parseRecords(op: Int, reply: ByteArray): List<Pair<Long, ByteArray>>? {
+        val status = if (reply.size >= RECORDS_AT && reply.u8(0) == op + 1) reply.u8(1) else null
+        val count = if (status == 0) reply.u8(2) else 0
+        val size = if (count > 0) (reply.size - RECORDS_AT) / count else 0
+        return when {
+            status == NO_DATA || (status == 0 && count == 0) -> emptyList()
+            status != 0 || size < Int.SIZE_BYTES -> null
+            else -> List(count) { i ->
+                val record = reply.copyOfRange(RECORDS_AT + i * size, RECORDS_AT + (i + 1) * size)
+                org.openstrap.protocol.ByteReader(record).u32() to record
+            }
+        }
+    }
+
+    private const val RECORDS_AT = 3
+    private const val NO_DATA = 2
+
     /** `09 status n` then n 44-byte records (isk.java:142-157, writer ia20.java:238-271). Null if not a score reply. */
     fun parseScores(reply: ByteArray): List<StrapReadiness>? {
         if (reply.size < 3 || reply.u8(0) != SCORE + 1) return null

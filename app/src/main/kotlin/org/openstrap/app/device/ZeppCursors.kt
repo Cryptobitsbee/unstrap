@@ -42,6 +42,10 @@ internal object ZeppCursors {
         else -> value
     }
 
+    /** The cursor stored under [key] as Zepp reads it: corrected, or the default when there is none. */
+    suspend fun read(cursors: SyncCursors, key: String, now: Long, zone: ZoneId): Long =
+        cursors.get(key)?.let { onRead(it, now) } ?: default(now, zone)
+
     /** A cursor as written (`c5a0`): below [FLOOR] is raised, over now + 1 h becomes now. */
     fun onWrite(value: Long, now: Long): Long = when {
         value < FLOOR -> FLOOR
@@ -61,7 +65,8 @@ internal object ZeppCursors {
         HistoryDataType.DAILY_MAX_EXERCISE_HR -> Days.start(read(HistoryDataType.ACTIVITY), zone)
         // Both second-HR types start from what 76 holds (Zepp: the newest stored second-HR record + 1 ms).
         HistoryDataType.SEC_HR, HistoryDataType.SEC_HR_V2 -> read(HistoryDataType.SEC_HR)
-        HistoryDataType.OSA_RESULT -> read(type) - 1
+        // 74 and the sleep plan (66, stored plan time − 1000 ms) start a second back.
+        HistoryDataType.OSA_RESULT, HistoryDataType.SLEEP_PLAN -> read(type) - 1
         HistoryDataType.SPO2_SINGLE, HistoryDataType.SPO2_OSA, HistoryDataType.SPO2_OSA_EVENT -> read(type) + 1
         // Breath events go with breath rate, from its cursor (`stk`).
         HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT -> read(HistoryDataType.SLEEP_BREATH_RATE)
@@ -121,10 +126,13 @@ internal object ZeppCursors {
             HistoryDataType.SLEEP_RESULT, HistoryDataType.RESTING_HEART_RATE, HistoryDataType.OSA_RESULT,
             HistoryDataType.SEC_HR, HistoryDataType.SEC_HR_V2,
             HistoryDataType.SPO2_SINGLE, HistoryDataType.SPO2_OSA, HistoryDataType.SPO2_OSA_EVENT,
-            HistoryDataType.SPORT_EFFECT,
+            HistoryDataType.SPORT_EFFECT, HistoryDataType.SLEEP_PLAN,
             -> last
             // Max HR reads activity's cursor, and breath events results are ignored: neither keeps one.
-            HistoryDataType.DAILY_MAX_EXERCISE_HR, HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT -> null
+            // Statistics are marked by the day they ran instead.
+            HistoryDataType.DAILY_MAX_EXERCISE_HR, HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT,
+            HistoryDataType.DEVICE_STATISTIC,
+            -> null
             else -> next ?: (last + 1)
         }
     }

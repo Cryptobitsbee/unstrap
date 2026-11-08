@@ -249,6 +249,9 @@ data class SleepBreathRate(
 /** Type 57: opaque 569-byte event kept raw for later processing. */
 class SleepRespiratoryEvent(override val timestamp: Long, val tzQuarters: Int, val raw: ByteArray) : HistoryRecord
 
+/** A record kept whole because unstrap doesn't read it yet: sleep plan (66), device statistics (44). */
+class RawHistoryRecord(val code: Int, override val timestamp: Long, val raw: ByteArray) : HistoryRecord
+
 /** Type 70: recovery HR after a workout. [timestamp] is the trackId (= workout start epoch). */
 data class RecoveryHeartRate(override val timestamp: Long, val samples: List<Int>) : HistoryRecord {
     val trackId: Long get() = timestamp

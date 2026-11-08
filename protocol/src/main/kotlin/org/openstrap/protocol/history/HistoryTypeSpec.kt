@@ -55,6 +55,8 @@ object HistoryTypeSpecs {
         HistoryTypeSpec(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT, 17, HistoryParsers.sleepRespiratoryEvent, loops = false),
         HistoryTypeSpec(HistoryDataType.SPO2_OSA_EVENT_ALT, 18, HistoryParsers.spo2OsaEventAlt),
         HistoryTypeSpec(HistoryDataType.TEMPERATURE_LEGACY, 19, HistoryParsers.legacyTemperature),
+        HistoryTypeSpec(HistoryDataType.SLEEP_PLAN, 20, HistoryParsers.sleepPlan),
+        HistoryTypeSpec(HistoryDataType.DEVICE_STATISTIC, 21, HistoryParsers.deviceStatistic, loops = false),
     ).sortedBy { it.syncOrder }
 
     private val byCode = all.associateBy { it.code }

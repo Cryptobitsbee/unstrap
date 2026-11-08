@@ -24,6 +24,8 @@ object Endpoints {
     const val SETTINGS = 0x000A
     const val ALARMS = 0x000F
     const val READINESS = 0x0049
+    const val PAI = 0x0022
+    const val SLEEP = 0x0032
     const val AUTH = 0x0082
 }
 

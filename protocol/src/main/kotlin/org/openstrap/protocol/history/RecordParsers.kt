@@ -158,6 +158,27 @@ object HistoryParsers {
         }
     }
 
+    /**
+     * Type 66 (04 §3.14): sleep plan structs, `uiTime u32` first, 59 bytes each, or 64 when the payload is a multiple
+     * of 64. Kept whole. Next: the last struct's time + 1 s, as Zepp's `yj50`.
+     */
+    val sleepPlan = HistoryParser { payload, _ ->
+        val size = if (payload.isNotEmpty() && payload.size % SLEEP_PLAN_PADDED == 0) SLEEP_PLAN_PADDED else SLEEP_PLAN_SIZE
+        fixed(payload, size, strict = false) { r, _ ->
+            val start = r.pos
+            val time = r.u32()
+            RawHistoryRecord(HistoryDataType.SLEEP_PLAN.code, time, payload.copyOfRange(start, start + size))
+        }
+    }
+    private const val SLEEP_PLAN_SIZE = 59
+    private const val SLEEP_PLAN_PADDED = 64
+
+    /** Type 44: device statistics, layout unknown. Kept whole under the chunk's header time. One START a day. */
+    val deviceStatistic = HistoryParser { payload, ctx ->
+        if (payload.isEmpty()) ParseResult.Success(emptyList(), null)
+        else ParseResult.Success(listOf(RawHistoryRecord(HistoryDataType.DEVICE_STATISTIC.code, ctx.headerTime, payload)), null)
+    }
+
     /** Type 2 (§3.4): `ts u32, tz i8, hr u8`; rejected if not a multiple of 6. */
     val spotHr = HistoryParser { payload, _ ->
         fixed(payload, 6, strict = true) { r, _ -> SpotHeartRate(r.u32(), r.s8(), r.u8()) }
