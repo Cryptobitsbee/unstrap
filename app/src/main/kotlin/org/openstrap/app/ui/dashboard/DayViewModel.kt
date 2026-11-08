@@ -32,6 +32,7 @@ import org.openstrap.app.data.SleepHistory
 import org.openstrap.app.data.Summaries
 import org.openstrap.app.data.Today
 import org.openstrap.app.data.catching
+import org.openstrap.app.data.db.DailyPai
 import org.openstrap.app.data.db.HealthAlertRow
 import org.openstrap.app.data.db.OsaEventRow
 import org.openstrap.app.data.db.OsaResultRow
@@ -170,6 +171,11 @@ data class ActivityHistory(
     val steps: Map<LocalDate, Int> = emptyMap(),
     /** The most steps of any day before [date]: the stored personal best when it's older, else read from the history. */
     val stepsBest: Int? = null,
+    /**
+     * The days with Heart points earned, from [STRIP_DAYS_BEFORE] days before [date] to the later of [date] and today: the
+     * days of a detail's strip, whichever of them is shown, so a day's dot is the same whichever day is open.
+     */
+    val heartPointsDays: Set<LocalDate> = emptySet(),
 ) {
     /** [heartPoints] when they're [day]'s, else none yet. */
     fun heartPointsOn(day: LocalDate): Map<LocalDate, HeartPointsDay> = if (date == day) heartPoints else emptyMap()
@@ -196,6 +202,9 @@ data class ActivityHistory(
 
         /** Heart points' month. */
         const val HEART_POINTS_DAYS = 30
+
+        /** A detail's strip starts this many days before its last day. */
+        const val STRIP_DAYS_BEFORE = 6L
 
         /** Calories' year and the year before it, for the change against it. */
         val CALORIES_DAYS = 2 * Range.Year.days
@@ -347,21 +356,31 @@ class DayViewModel(
     /** Each day's Heart points and stored calories up to the day shown, for the Activity tab and its details. */
     val activityHistory: StateFlow<ActivityHistory> = selected.flatMapLatest { d ->
         combine(
-            repo.dailyPai(d.minusDays(ActivityHistory.HEART_POINTS_DAYS - 1L), d),
+            // The days after [d] up to today, for the strip's dots; nothing is read for today.
+            stripLater(d),
             repo.dailyCalories(d.minusDays(ActivityHistory.CALORIES_DAYS - 1L), d),
             stepsAndBest(d),
-        ) { pai, calories, (steps, best) ->
+            repo.dailyPai(d.minusDays(ActivityHistory.HEART_POINTS_DAYS - 1L), d),
+        ) { later, calories, (steps, best), pai ->
             ActivityHistory(
                 date = d,
                 heartPoints = pai.mapValues { (_, p) -> HeartPointsDay(p.daily, p.total) },
                 calories = calories.mapValues { (_, e) -> CaloriesDay(e.activeKcal, e.totalKcal, e.workoutKcal, e.partial) },
                 steps = steps,
                 stepsBest = best,
+                heartPointsDays = (pai.filterKeys { it >= d.minusDays(ActivityHistory.STRIP_DAYS_BEFORE) } + later)
+                    .filterValues { it.daily > 0 }.keys,
             )
         }
     }
         .flowOn(work)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ActivityHistory())
+
+    /** The Heart points of the days after [d] up to today, for the strip's later days; none when [d] is today. */
+    private fun stripLater(d: LocalDate): Flow<Map<LocalDate, DailyPai>> {
+        val today = Today.on(clock())
+        return if (d < today) repo.dailyPai(d.plusDays(1), today) else flowOf(emptyMap())
+    }
 
     /**
      * [d]'s steps from [ActivityHistory.STEPS_DAYS] days before it to its week's end, and the most steps of a day

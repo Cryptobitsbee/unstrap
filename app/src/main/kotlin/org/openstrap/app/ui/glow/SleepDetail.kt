@@ -96,7 +96,7 @@ private fun sleepDays(state: DayUiState, history: DailyHistory): Set<LocalDate> 
     // shown goes by its own night, as the page says it, so a dot never stands beside "No sleep recorded".
     val loaded = state.nights.map { it.date }.toSet()
     val days = state.nights.filter { it.session != null }.map { it.date }.toSet() +
-        daysWithData(DailyMetric.Breathing, state.date, today, history).filter { it !in loaded }
+        stripDaysWithData(DailyMetric.Breathing, state.date, today, history).filter { it !in loaded }
     return if (state.loaded && state.sleep == null) days - state.date else days
 }
 
@@ -175,7 +175,7 @@ internal fun SleepScoreDetail(
             // The horizon arc (chart kit, spec 2.7) holds the night's score, centred, the number under its crest. A
             // scrub takes its place in the hero alone, so the rest of the detail stays put (audit K4).
             heroValue = if (range == Range.Day && score != null) {
-                { HorizonArc(score / 100f, color, key = state.date) { DetailScoreNumber(score) } }
+                { HorizonArc(score / 100f, color, key = Score.Sleep) { DetailScoreNumber(score, state.date) } }
             } else null,
             scrubbed = { scrub },
         ) {
