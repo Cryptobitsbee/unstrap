@@ -55,7 +55,9 @@ class ZeppChannelJobsTest {
         assertEquals(listOf(12.5f, 3f), records.map { it.dailyPai })
         assertEquals(listOf(3, 5), records.map { it.version })
         assertEquals(52, records[0].restHr)
-        assertNull(PaiCodec.parse(byteArrayOf(0x0D, 1, 0)))
+        // Seen on firmware 3.27.0.1 with nothing new: Zepp's codec gives an empty list, not an error.
+        assertEquals(emptyList<Any>(), PaiCodec.parse(byteArrayOf(0x0D, 1)))
+        assertNull(PaiCodec.parse(byteArrayOf(0x09, 0, 0)))
         assertEquals(emptyList<Any>(), PaiCodec.parse(byteArrayOf(0x0D, 0, 0)))
     }
 

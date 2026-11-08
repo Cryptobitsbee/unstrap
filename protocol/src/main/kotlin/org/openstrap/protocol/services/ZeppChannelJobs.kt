@@ -27,12 +27,14 @@ object PaiCodec {
     fun isReply(reply: ByteArray) = reply.isNotEmpty() && reply.u8(0) == REPLY
 
     /**
-     * `0D status count` then 102-byte records (`xqk` case 0), read whole whatever their version byte says. Null when
-     * it isn't a reply or the status is an error.
+     * `0D status count` then 102-byte records (`xqk` case 0), read whole whatever their version byte says. Any status
+     * but 0 is an empty result, as Zepp's codec returns it (the strap answers `0D 01` when it has nothing new). Null
+     * only when it isn't a reply.
      */
-    fun parse(reply: ByteArray): List<PaiRecord>? {
-        if (reply.size < HEADER || !isReply(reply) || reply.u8(1) != 0) return null
-        return (HEADER..reply.size - RECORD step RECORD).mapNotNull { at ->
+    fun parse(reply: ByteArray): List<PaiRecord>? = when {
+        !isReply(reply) -> null
+        reply.size < HEADER || reply.u8(1) != 0 -> emptyList()
+        else -> (HEADER..reply.size - RECORD step RECORD).mapNotNull { at ->
             val record = reply.copyOfRange(at, at + RECORD)
             val version = record[0]
             record[0] = FULL_RECORD_VERSION
