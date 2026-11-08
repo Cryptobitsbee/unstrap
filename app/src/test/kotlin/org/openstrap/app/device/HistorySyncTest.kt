@@ -20,7 +20,6 @@ import org.openstrap.app.ble.Notification
 import org.openstrap.app.data.db.ActivityMinute
 import org.openstrap.app.data.db.DeletedWorkout
 import org.openstrap.app.data.db.DismissedWorkout
-import org.openstrap.app.data.db.HrvSample
 import org.openstrap.app.data.db.OpenStrapDatabase
 import org.openstrap.app.data.db.SportEffectRow
 import org.openstrap.app.testing.inMemoryDb
@@ -195,19 +194,19 @@ class HistorySyncTest {
         assertEquals(listOf(listOf(base, 42.5)), table("SELECT timestamp, milliseconds FROM hrv_sdnn"))
         assertEquals(listOf(listOf(base, 12.5, 80.0, 52L)), table("SELECT timestamp, daily, total, restingHeartRate FROM pai"))
         assertEquals(listOf(listOf(dayKey(base), 52L)), table("SELECT day, bpm FROM resting_hr"))
-        // Each cursor ends past its last record: HRV went in two chunks and the second START started after the first.
+        // HRV went in two chunks, the second from the first's last record + 60 s, and its cursor is the last + 1 s.
         assertEquals(base + 901, cursors.values[key(HistoryDataType.HRV_RMSSD)])
-        assertTrue(strap.starts.contains(HistoryDataType.HRV_RMSSD.code to base + 301))
+        assertTrue(strap.starts.toString(), strap.starts.contains(HistoryDataType.HRV_RMSSD.code to base + 360))
     }
 
-    @Test fun `the cursor moves only once the chunk's rows are in`() = runTest {
+    @Test fun `the cursor is written once, after all the type's rows are in`() = runTest {
         seedStrap()
         val seen = mutableListOf<Pair<Long, Int>>()
         cursors.onSet = { k, v -> if (k == key(HistoryDataType.HRV_RMSSD)) seen += v to table("SELECT * FROM hrv WHERE timestamp < $v").size }
         runSync()
 
-        // Every record before each cursor was stored when it moved.
-        assertEquals(listOf(base + 301 to 1, base + 901 to 3), seen)
+        // Two chunks, one write, as Zepp's handler does after storing.
+        assertEquals(listOf(base + 901 to 3), seen)
     }
 
     @Test fun `a chunk that fails to store keeps none of its rows and leaves the cursor`() = runTest {
@@ -230,7 +229,7 @@ class HistorySyncTest {
         cursors.onSet = { k, _ -> if (!killed && k == key(HistoryDataType.HRV_RMSSD)) { killed = true; error("process killed") } }
         runSync()
         val afterKill = table("SELECT timestamp, milliseconds FROM hrv ORDER BY timestamp")
-        assertEquals(listOf(listOf(base, 41L)), afterKill)
+        assertEquals(3, afterKill.size)
         assertEquals(null, cursors.values[key(HistoryDataType.HRV_RMSSD)])
 
         runSync()
@@ -347,41 +346,126 @@ class HistorySyncTest {
     private val day = 24 * 3600L
     private val now get() = System.currentTimeMillis() / 1000
 
-    @Test fun `a type with no cursor fetches all the strap still holds`() = runTest {
+    @Test fun `a type with no cursor starts two days back at the half day, as Zepp`() = runTest {
         // Forget strap cleared the cursors, and the strap was away for longer than two days.
-        strap.records[HistoryDataType.HRV_RMSSD.code] = listOf(hrv(base - 10 * day, 40), hrv(base - 5 * day, 50))
+        strap.records[HistoryDataType.HRV_RMSSD.code] = listOf(hrv(base - 10 * day, 40), hrv(base - 5 * day, 50), hrv(base, 60))
+        val before = ZeppCursors.default(now, zone)
         runSync()
-
-        assertEquals(listOf(base - 10 * day, base - 5 * day), table("SELECT timestamp FROM hrv ORDER BY timestamp").map { it[0] })
-        // From as far back as the strap keeps history: 60 days.
         val first = strap.starts.first { it.first == HistoryDataType.HRV_RMSSD.code }.second
-        assertTrue("$first", first in now - 60 * day - 60..now - 60 * day)
+        assertTrue("$first", first == before || first == ZeppCursors.default(now, zone))
+        assertEquals(listOf(base), table("SELECT timestamp FROM hrv ORDER BY timestamp").map { it[0] })
     }
 
-    @Test fun `a type with no cursor starts at its newest stored row`() = runTest {
-        dao.insertHrv(listOf(HrvSample(base - 3 * day, 45)))
-        strap.records[HistoryDataType.HRV_RMSSD.code] = listOf(hrv(base - 5 * day, 50), hrv(base - 3 * day, 45), hrv(base - day, 60))
+    @Test fun `a cursor over an hour ahead is read as two days back`() = runTest {
+        cursors.values[key(HistoryDataType.HRV_RMSSD)] = now + 2 * 3600
+        strap.records[HistoryDataType.HRV_RMSSD.code] = listOf(hrv(base, 60))
         runSync()
-
-        assertEquals(base - 3 * day, strap.starts.first { it.first == HistoryDataType.HRV_RMSSD.code }.second)
-        assertEquals(listOf(base - 3 * day, base - day), table("SELECT timestamp FROM hrv ORDER BY timestamp").map { it[0] })
+        val first = strap.starts.first { it.first == HistoryDataType.HRV_RMSSD.code }.second
+        assertTrue("$first", first in now - 2 * day - 60..now - 2 * day)
     }
 
-    @Test fun `a day table with no cursor starts a day before its newest date's local midnight`() = runTest {
+    @Test fun `resting HR starts at its cursor's local midnight`() = runTest {
         // Away from UTC, where a date's key and its local midnight differ.
         val saved = java.util.TimeZone.getDefault()
         java.util.TimeZone.setDefault(java.util.TimeZone.getTimeZone("Asia/Kathmandu"))
         try {
             val kathmandu = ZoneId.of("Asia/Kathmandu")
-            val date = Instant.ofEpochSecond(base - 3 * day).atZone(kathmandu).toLocalDate()
-            dao.insertRestingHr(listOf(org.openstrap.app.data.db.RestingHeartRate(date, 52)))
+            cursors.values[key(HistoryDataType.RESTING_HEART_RATE)] = base
             strap.records[HistoryDataType.RESTING_HEART_RATE.code] = emptyList()
             runSync()
             val start = strap.starts.first { it.first == HistoryDataType.RESTING_HEART_RATE.code }.second
-            assertEquals(date.atStartOfDay(kathmandu).toEpochSecond() - day, start)
+            assertEquals(Instant.ofEpochSecond(base).atZone(kathmandu).toLocalDate().atStartOfDay(kathmandu).toEpochSecond(), start)
         } finally {
             java.util.TimeZone.setDefault(saved)
         }
+    }
+
+    @Test fun `sleep results start at the cursor's local midnight, never over 45 days back`() = runTest {
+        cursors.values[key(HistoryDataType.SLEEP_RESULT)] = base
+        strap.records[HistoryDataType.SLEEP_RESULT.code] = emptyList()
+        runSync()
+        assertEquals(org.openstrap.app.data.Days.start(base, zone), strap.starts.first { it.first == HistoryDataType.SLEEP_RESULT.code }.second)
+
+        strap.starts.clear()
+        cursors.values[key(HistoryDataType.SLEEP_RESULT)] = now - 60 * day
+        runSync()
+        val first = strap.starts.first { it.first == HistoryDataType.SLEEP_RESULT.code }.second
+        assertTrue("$first", first in now - 45 * day - 60..now - 45 * day)
+    }
+
+    @Test fun `max HR starts at the activity cursor's midnight and keeps no cursor`() = runTest {
+        cursors.values[key(HistoryDataType.ACTIVITY)] = base
+        cursors.values[key(HistoryDataType.DAILY_MAX_EXERCISE_HR)] = base - 5 * day
+        strap.records[HistoryDataType.ACTIVITY.code] = emptyList()
+        strap.records[HistoryDataType.DAILY_MAX_EXERCISE_HR.code] = listOf(base to ByteWriter().u32(base).u8(0).u8(150).toByteArray())
+        runSync()
+        assertEquals(org.openstrap.app.data.Days.start(base, zone), strap.starts.first { it.first == HistoryDataType.DAILY_MAX_EXERCISE_HR.code }.second)
+        assertEquals(base - 5 * day, cursors.values[key(HistoryDataType.DAILY_MAX_EXERCISE_HR)])
+    }
+
+    /** An 8-byte activity minute as the strap writes it, or an unwritten one (all 0xFF). */
+    private fun minute(ts: Long, steps: Int?) =
+        ts to if (steps == null) ByteArray(8) { 0xFF.toByte() } else byteArrayOf(0x70, 10, steps.toByte(), 80, 5, 0, 0, 0)
+
+    @Test fun `activity counts unwritten minutes and stops at the first one after now`() = runTest {
+        val start = (now - 600) / 60 * 60
+        cursors.values[key(HistoryDataType.ACTIVITY)] = start
+        // 10 minutes back to 2 minutes ahead: 3 unwritten in the past, the one in progress, then unwritten ahead.
+        val minutes = (0 until 13).map { i ->
+            val ts = start + i * 60L
+            minute(ts, if (i in 3..5 || ts > now) null else 20 + i)
+        }
+        strap.records[HistoryDataType.ACTIVITY.code] = minutes
+        strap.perChunk[HistoryDataType.ACTIVITY.code] = 4
+        runSync()
+
+        // Each next START is the header + 4 minutes, unwritten ones counted.
+        val asked = strap.starts.filter { it.first == HistoryDataType.ACTIVITY.code }.map { it.second }
+        assertEquals(listOf(start, start + 240, start + 480, start + 720), asked.take(4))
+        // Unwritten minutes are not stored, and the minute in progress is.
+        val stored = table("SELECT timestamp FROM activity_minute ORDER BY timestamp").map { it[0] as Long }
+        assertTrue(stored.none { it in start + 180..start + 300 })
+        assertEquals(now / 60 * 60, stored.last())
+        // The cursor is the minute after the last one before the first unwritten minute after now.
+        assertEquals(now / 60 * 60 + 60, cursors.values[key(HistoryDataType.ACTIVITY)])
+    }
+
+    @Test fun `second HR v2 starts from 76's cursor and writes it there`() = runTest {
+        cursors.values[key(HistoryDataType.SEC_HR)] = base
+        cursors.values[key(HistoryDataType.SEC_HR_V2)] = base - day
+        cursors.values[HistorySync.CURSORS_ZEPP_KEY] = 1
+        val block = ByteWriter().u32(base).u16(3).u8(60).u8(61).u8(62).toByteArray()
+        strap.records[HistoryDataType.SEC_HR_V2.code] = listOf(base to block)
+        runSync()
+        assertEquals(base, strap.starts.first { it.first == HistoryDataType.SEC_HR_V2.code }.second)
+        assertEquals(base + 2, cursors.values[key(HistoryDataType.SEC_HR)])
+        assertEquals(base - day, cursors.values[key(HistoryDataType.SEC_HR_V2)])
+    }
+
+    @Test fun `breath events run right after breath rate, from its cursor, and keep none`() = runTest {
+        cursors.values[key(HistoryDataType.SLEEP_BREATH_RATE)] = base
+        strap.records[HistoryDataType.SLEEP_BREATH_RATE.code] = emptyList()
+        strap.records[HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT.code] = emptyList()
+        strap.records[HistoryDataType.HRV_RMSSD.code] = emptyList()
+        runSync()
+        val codes = strap.starts.map { it.first }
+        val rate = codes.indexOf(HistoryDataType.SLEEP_BREATH_RATE.code)
+        assertEquals(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT.code, codes[rate + 1])
+        assertEquals(base, strap.starts[rate + 1].second)
+        assertEquals(null, cursors.values[key(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT)])
+    }
+
+    @Test fun `stored cursors move to Zepp's keys once`() = runTest {
+        cursors.values[key(HistoryDataType.SEC_HR)] = base - day
+        cursors.values[key(HistoryDataType.SEC_HR_V2)] = base
+        cursors.values[key(HistoryDataType.SPORT_SUMMARY)] = base - 2 * day
+        runSync()
+        assertEquals(base, cursors.values[key(HistoryDataType.SEC_HR)])
+        assertEquals(base - 2 * day, cursors.values[key(HistoryDataType.SPORT_DETAIL)])
+
+        cursors.values[key(HistoryDataType.SEC_HR_V2)] = base + day
+        runSync()
+        assertEquals(base, cursors.values[key(HistoryDataType.SEC_HR)])
     }
 
     @Test fun `minutes caught up from over a day back are marked, so no nights are made from them`() = runTest {
@@ -397,19 +481,6 @@ class HistorySyncTest {
         strap.records[HistoryDataType.ACTIVITY.code] = emptyList()
         runSync()
         assertEquals(null, cursors.values[HistorySync.MINUTES_CHECKED_KEY])
-    }
-
-    @Test fun `the strap's sleep results are fetched again once, three weeks back`() = runTest {
-        cursors.values[key(HistoryDataType.SLEEP_RESULT)] = now - 3600
-        strap.records[HistoryDataType.SLEEP_RESULT.code] = emptyList()
-        runSync()
-        val first = strap.starts.first { it.first == HistoryDataType.SLEEP_RESULT.code }.second
-        assertTrue("$first", first in now - 21 * day - 60..now - 21 * day + 60)
-
-        strap.starts.clear()
-        cursors.values[key(HistoryDataType.SLEEP_RESULT)] = now - 3600
-        runSync()
-        assertEquals(now - 3600, strap.starts.first { it.first == HistoryDataType.SLEEP_RESULT.code }.second)
     }
 
     @Test fun `activity after now stays when the phone's clock went back`() = runTest {

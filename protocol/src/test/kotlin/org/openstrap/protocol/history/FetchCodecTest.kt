@@ -244,38 +244,40 @@ class VersionReplyTest {
     }
 }
 
+/** Zepp counts every activity record as a minute, unwritten ones (all 0xFF) too: next = header + N minutes. */
 class ActivityPaddingTest {
+    private fun parse(hex: String) =
+        HistoryParsers.activity.parse(hex.hexToBytes(), ParseContext(1000, activityRecordSize = 8)) as ParseResult.Success
+
     @org.junit.Test
-    fun dropsTrailingFfRecords() {
-        val payload = "702300500d00000070430a5005000000ffffffffffffffffffffffffffffffff".hexToBytes()
-        val r = HistoryParsers.activity.parse(payload, ParseContext(1000, activityRecordSize = 8)) as ParseResult.Success
-        org.junit.Assert.assertEquals(2, r.records.size)
-        org.junit.Assert.assertEquals(listOf(0, 10), r.records.map { it.steps })
-        org.junit.Assert.assertEquals(1000 + 120L, r.nextCursor)
+    fun trailingFfRecordsAreMinutesToo() {
+        val r = parse("702300500d00000070430a5005000000ffffffffffffffffffffffffffffffff")
+        org.junit.Assert.assertEquals(listOf(1000L, 1060, 1120, 1180), r.records.map { it.timestamp })
+        org.junit.Assert.assertEquals(listOf(false, false, true, true), r.records.map { it.isBlank })
+        org.junit.Assert.assertEquals(1000 + 240L, r.nextCursor)
     }
 
     @org.junit.Test
-    fun stopsAtFirstFfRecordEvenWithStaleSlotsAfter() {
-        // Captured shape: real minutes, unwritten 0xFF slots, then stale non-0xFF slots.
-        val payload = ("603300500500000060431a5207000000" + "ff".repeat(16) + "7300000005000000".repeat(3)).hexToBytes()
-        val r = HistoryParsers.activity.parse(payload, ParseContext(1000, activityRecordSize = 8)) as ParseResult.Success
-        org.junit.Assert.assertEquals(listOf(0, 26), r.records.map { it.steps })
-        org.junit.Assert.assertEquals(1000 + 120L, r.nextCursor)
+    fun writtenMinutesAfterUnwrittenOnesKeepTheirTimes() {
+        // Captured shape: real minutes, unwritten 0xFF slots, then written slots.
+        val r = parse("603300500500000060431a5207000000" + "ff".repeat(16) + "7300000005000000".repeat(3))
+        org.junit.Assert.assertEquals(7, r.records.size)
+        org.junit.Assert.assertEquals(1000 + 4 * 60L, r.records[4].timestamp)
+        org.junit.Assert.assertFalse(r.records[4].isBlank)
+        org.junit.Assert.assertEquals(1000 + 420L, r.nextCursor)
     }
 
     @org.junit.Test
-    fun skipsLeadingFfRecordsAndAdvancesCursor() {
-        // Captured on hardware: the chunk opens with a 0xFF slot. Stopping there stalled activity sync for good.
-        val payload = ("ff".repeat(8) + "5016004705000000" + "ff".repeat(8) + "500e004605000000").hexToBytes()
-        val r = HistoryParsers.activity.parse(payload, ParseContext(1000, activityRecordSize = 8)) as ParseResult.Success
-        org.junit.Assert.assertEquals(listOf(1060L), r.records.map { it.timestamp })
-        org.junit.Assert.assertEquals(1000 + 120L, r.nextCursor)
+    fun leadingFfRecordsCount() {
+        val r = parse("ff".repeat(8) + "5016004705000000" + "ff".repeat(8) + "500e004605000000")
+        org.junit.Assert.assertEquals(listOf(true, false, true, false), r.records.map { it.isBlank })
+        org.junit.Assert.assertEquals(1000 + 240L, r.nextCursor)
     }
 
     @org.junit.Test
-    fun allFfChunkStillAdvancesCursor() {
-        val r = HistoryParsers.activity.parse("ff".repeat(24).hexToBytes(), ParseContext(1000, activityRecordSize = 8)) as ParseResult.Success
-        org.junit.Assert.assertTrue(r.records.isEmpty())
+    fun allFfChunkIsAllBlank() {
+        val r = parse("ff".repeat(24))
+        org.junit.Assert.assertTrue(r.records.all { it.isBlank })
         org.junit.Assert.assertEquals(1000 + 180L, r.nextCursor)
     }
 }

@@ -220,7 +220,8 @@ class GdspClient(
         val d = fetch(HistoryDataType.SPORT_DETAIL.code, since, zone)
         if (parsed !is ParseResult.Success) return WorkoutFetch.Failed("summary: ${(parsed as ParseResult.Failure).reason}")
         val summary = parsed.records.singleOrNull() ?: return WorkoutFetch.None
-        val next = parsed.nextCursor ?: (summary.trackId + 1)
+        // Zepp's next START: the summary's header time + 1000 ms.
+        val next = s.headerTime + 1
         var retry = false
         val detail = when (d) {
             is GdspFetch.Chunk -> when (val r = WorkoutParsers.detail.parse(d.payload, ParseContext(summary.trackId))) {

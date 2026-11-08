@@ -104,37 +104,26 @@ private fun ByteReader.u8List(n: Int): List<Int> = List(n) { u8() }
 
 object HistoryParsers {
 
-    /** Type 1 (§3.1): per-minute activity; 4-byte or >= 8-byte records. */
+    /**
+     * Type 1 (§3.1): per-minute activity; 4-byte or >= 8-byte records. Every record is a minute from the header on,
+     * slots the strap hasn't written (all 0xFF, [ActivitySample.isBlank]) included, as Zepp counts them: its next
+     * START is header + N minutes. Storing leaves the blank ones out.
+     */
     val activity = HistoryParser { raw, ctx ->
         val size = if (ctx.activityRecordSize <= 4) 4 else ctx.activityRecordSize
-        // Real minutes end at the first all-0xFF record (a slot the strap hasn't written). On hardware the
-        // strap sometimes sends its whole buffer: a few real minutes, hours of 0xFF, then weeks of stale
-        // slots. Read as data the 0xFF records are 255 steps each and push the cursor into the future.
-        // A chunk can also *start* with 0xFF slots (minutes the strap has no record for). Those are skipped
-        // and the cursor still moves past them; otherwise every sync re-fetches the same chunk forever.
-        val whole = raw.size - raw.size % size
-        fun isPadding(at: Int) = (at until at + size).all { raw[it] == 0xFF.toByte() }
-        var begin = 0
-        while (begin < whole && isPadding(begin)) begin += size
-        var end = begin
-        while (end < whole && !isPadding(end)) end += size
-        val skipped = begin / size
-        val first = ctx.headerTime + skipped * 60L
-        // Keep any trailing partial record so it's still reported as dropped bytes.
-        val payload = if (begin == 0 && end == whole) raw else raw.copyOfRange(begin, end) + raw.copyOfRange(whole, raw.size)
-        fixed(payload, size, strict = false, next = { recs ->
-            if (recs.isEmpty() && skipped == 0) null else first + recs.size * 60L
+        fixed(raw, size, strict = false, next = { recs ->
+            if (recs.isEmpty()) null else ctx.headerTime + recs.size * 60L
         }) { r, i ->
             val mode = r.u8(); val intensity = r.u8(); val steps = r.u8(); val hr = r.u8()
             val extra = if (size >= 8) ActivitySleepExtra(r.u8(), r.u8(), r.u8(), r.u8()) else null
-            ActivitySample(first + i * 60L, mode, intensity, steps, hr, extra)
+            ActivitySample(ctx.headerTime + i * 60L, mode, intensity, steps, hr, extra)
         }
     }
 
     /** Type 88 (§3.1.3): 12-byte records per minute; rejected if not a multiple of 12. */
     val todayActivityExtended = HistoryParser { payload, ctx ->
-        // Cursor: minute series -> header + N minutes (02 §1.6).
-        fixed(payload, 12, strict = true, next = { if (it.isEmpty()) null else ctx.headerTime + it.size * 60L }) { r, i ->
+        // Cursor: header + N minutes + 1 s, as Zepp's `f40`.
+        fixed(payload, 12, strict = true, next = { if (it.isEmpty()) null else ctx.headerTime + it.size * 60L + 1 }) { r, i ->
             TodayActivityExtended(
                 ctx.headerTime + i * 60L, r.u8(), r.u8(), r.u8(), r.u8(), r.u8(), r.u8(), r.u8(), r.u8(),
                 r.u8(), r.u8(), r.u16(),
@@ -152,13 +141,11 @@ object HistoryParsers {
         guarded {
             val r = ByteReader(payload)
             val out = ArrayList<SecondHeartRate>()
-            var blocksEnd: Long? = null
             while (r.remaining >= 6) {
                 val start = r.u32()
                 val count = r.u16()
                 if (count == 0) continue
                 if (r.remaining < count) return@guarded ParseResult.Failure("SEC_HR_V2 block truncated")
-                blocksEnd = maxOf(blocksEnd ?: 0L, start + count)
                 val hrs = r.bytes(count)
                 var n = count
                 while (n > 0 && hrs[n - 1] == 0xFF.toByte()) n--
@@ -166,8 +153,8 @@ object HistoryParsers {
             }
             // On hardware a short block sometimes repeats the next block's first second; keep the later value.
             val unique = out.associateBy { it.timestamp }.values.sortedBy { it.timestamp }
-            // A chunk of only 0xFF padding still moves the cursor past its blocks, or the type stalls.
-            ParseResult.Success(unique, lastPlusOne(unique) ?: blocksEnd, r.remaining)
+            // Zepp's next is the last kept sample + 1 s: a chunk of only 0xFF padding ends the loop.
+            ParseResult.Success(unique, lastPlusOne(unique), r.remaining)
         }
     }
 

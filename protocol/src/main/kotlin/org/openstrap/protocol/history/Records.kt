@@ -46,6 +46,17 @@ data class ActivitySample(
     val heartRate: Int? get() = HeartRateSentinel.valid(rawHeartRate)
     val mode: Int get() = if (rawMode == ActivityMode.BLANK) rawMode else rawMode and 0x0F
     val isWorn: Boolean get() = mode != ActivityMode.NOT_WORN && mode != ActivityMode.CHARGING
+
+    /** A slot the strap hasn't written: every byte 0xFF. Zepp counts it as a minute; it holds no data. */
+    val isBlank: Boolean
+        get() = listOfNotNull(
+            rawMode, intensity, steps, rawHeartRate,
+            sleepExtra?.retain, sleepExtra?.sleepPostureAndProb, sleepExtra?.sleepProbDeep, sleepExtra?.sleepProbRem,
+        ).all { it == BLANK_BYTE }
+
+    private companion object {
+        const val BLANK_BYTE = 0xFF
+    }
 }
 
 // UNVERIFIED: 02 §3.1 - bit-level meaning of bytes 4..7 is unknown; exposed raw.
