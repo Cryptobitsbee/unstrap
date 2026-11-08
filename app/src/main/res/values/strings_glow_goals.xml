@@ -26,8 +26,30 @@
     <string name="glow_goals_personal_bests">Personal bests</string>
     <!-- The personal bests panel before there are any. -->
     <string name="glow_goals_no_bests">Your bests show here after your first workouts.</string>
-    <!-- Above the row of badges: how many are earned out of all of them. -->
-    <string name="glow_goals_badges_count">Badges, <xliff:g id="earned" example="5">%1$d</xliff:g> of <xliff:g id="total" example="24">%2$d</xliff:g></string>
+    <!-- The badges panel's title on the Goals and bests page. Its note says how many are earned (glow_goals_earned_count). -->
+    <string name="glow_goals_badges">Badges</string>
+    <!-- The title of the card with the badge closest to earned, its name and how far along under it. -->
+    <string name="glow_goals_next_badge">Next badge</string>
+    <!-- Under a personal best's medal, and on its sheet, while that best hasn't been set. -->
+    <string name="glow_goals_not_set">Not set yet</string>
+    <!-- On a badge's sheet, and read out for its medal, while it hasn't been earned. -->
+    <string name="glow_goals_not_earned">Not earned yet</string>
+    <!-- On a badge's sheet, and read out for its medal: the day it was earned, written out in full. -->
+    <string name="glow_goals_earned_on">Earned <xliff:g id="date" example="Thursday, 30 October 2026">%1$s</xliff:g></string>
+    <!-- Read out by screen readers for a badge or a best's medal: its name, then its state or figure. -->
+    <string name="glow_goals_badge_described"><xliff:g id="name" example="First run">%1$s</xliff:g>, <xliff:g id="state" example="Not earned yet">%2$s</xliff:g></string>
+    <!-- At the foot of a badge's sheet, for the badges counted from workouts: which workouts count. -->
+    <string name="glow_goals_counts_rule">Workouts count from 10 minutes, when you start them or keep them.</string>
+    <!-- On a fastest best's sheet: what it measures. The distance is a name like "5 km" or "half marathon". -->
+    <string name="glow_goals_best_fastest_how">Your quickest <xliff:g id="distance" example="5 km">%1$s</xliff:g> inside any run measured by GPS.</string>
+    <!-- On the longest run's sheet: what it measures. -->
+    <string name="glow_goals_best_longest_run_how">Your farthest single run measured by GPS.</string>
+    <!-- On the longest workout's sheet: what it measures. Moving time leaves the pauses out. -->
+    <string name="glow_goals_best_longest_workout_how">The longest workout you started, in moving time.</string>
+    <!-- On a lift's sheet: what it measures. -->
+    <string name="glow_goals_best_lift_how">The heaviest set you logged for this exercise, with its reps.</string>
+    <!-- On the most steps sheet: what it measures. -->
+    <string name="glow_goals_best_steps_how">The most steps the strap counted in a single day.</string>
     <!-- A button that opens every badge, and that page's title. -->
     <string name="glow_goals_all_badges">All badges</string>
     <!-- A button that opens last week's recap. -->

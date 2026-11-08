@@ -3,7 +3,7 @@
   Badges (data/Rewards.kt): each badge's title under its art on the Goals and bests page, in celebrations and in a
   workout's summary, and the few letters drawn on the art itself. Tabata is a workout format, keep it as is.
 -->
-<resources>
+<resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <!-- A badge's title, under its art in a grid of three. Up to two short lines. -->
     <string name="core_badge_first_workout">First workout</string>
     <!-- A badge's title, under its art in a grid of three. Up to two short lines. -->
@@ -67,4 +67,37 @@
     <string name="core_badge_art_mind">Om</string>
     <!-- The letters drawn on a badge's art, for a first game. Two to four letters, it must fit inside a small circle. -->
     <string name="core_badge_art_game">Play</string>
+
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_workout">Finish your first workout.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_10k_steps">Walk 10,000 steps in a single day.</string>
+    <!-- On a workout count badge's sheet: how it is earned. The number is how many workouts, with its thousands mark. -->
+    <string name="core_badge_how_workouts">Finish <xliff:g id="count" example="50">%1$s</xliff:g> workouts.</string>
+    <!-- On a distance badge's sheet: how it is earned. The number is the distance in km, with its thousands mark. -->
+    <string name="core_badge_how_km">Cover <xliff:g id="km" example="1,000">%1$s</xliff:g> km in all, across the workouts you started.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_steps_1m">Walk a million steps in all, counted day by day.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_goal_first">Meet your weekly workout goal for the first time.</string>
+    <!-- On a weeks in a row badge's sheet: how it is earned. The number is the weeks. A week under way is this week. -->
+    <string name="core_badge_how_goal_run">Meet your weekly goal <xliff:g id="weeks" example="12">%1$s</xliff:g> weeks in a row. A week still under way never breaks the run.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_run">Finish a run, outdoors, on a trail or on a treadmill.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_5k">Run 5 km in one go, measured by GPS.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_10k">Run 10 km in one go, measured by GPS.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_indoor">Finish an indoor cardio workout, on a machine or in the pool.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_log">Log the weight and reps of a set in a strength workout.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. Tabata is a workout format, keep it as is. -->
+    <string name="core_badge_how_first_tabata">Finish a Tabata, 20 seconds of work and 10 seconds of rest.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_reps">Finish a run of intervals, a distance or a time repeated with rest between.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_mind">Finish a yoga or calm session.</string>
+    <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
+    <string name="core_badge_how_first_game">Finish a game or sport, such as tennis, padel or climbing.</string>
 </resources>

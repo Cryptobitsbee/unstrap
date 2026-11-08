@@ -4,8 +4,6 @@ import org.openstrap.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,18 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.openstrap.app.data.Rewards
 import org.openstrap.app.ui.theme.AppIcons
@@ -51,39 +44,6 @@ internal fun badgeColor(group: Rewards.Group): Color = when (group) {
 /** A personal best's colour: the calories' gold. */
 internal val BestColor = MetricColors.calories
 
-/**
- * A badge's art in the glow language: a round glow in [color] lit from below, a hairline rim, and its [short] text.
- * [dots] puts the text in dots (the one dotted number on its screen); a [locked] badge is dim and unlit.
- */
-@Composable
-internal fun BadgeArt(
-    short: String, color: Color, size: Dp, modifier: Modifier = Modifier, locked: Boolean = false, dots: Boolean = false, under: String? = null,
-    /** Just a ring in the colour with the text in it (board AchievementsV1's row), no fill. */
-    ring: Boolean = false,
-) {
-    Box(
-        modifier.size(size).alpha(if (locked) 0.35f else 1f)
-            .let { m ->
-                if (ring) m else m.background(
-                    if (locked) Brush.radialGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.02f)))
-                    else Brush.verticalGradient(listOf(Color.Black, color.copy(alpha = 0.55f))),
-                    CircleShape,
-                )
-            }
-            .border(if (ring) 2.dp else 1.dp, if (locked) Color.White.copy(alpha = if (ring) 0.5f else 0.12f) else color.copy(alpha = if (ring) 1f else 0.8f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (dots) DotMatrixText(short, dot = DotSize.Hero)
-            else Text(
-                short, color = if (ring && !locked) color else Color.White, maxLines = 1,
-                style = if (size >= 80.dp) GlowType.pageTitle else GlowType.cardTitle,
-            )
-            under?.let { Text(it, color = Color.White, style = GlowType.body, modifier = Modifier.padding(top = 6.dp)) }
-        }
-    }
-}
-
 /** The close button in a celebration's top corner. */
 @Composable
 private fun CloseRow(title: String?, onClose: () -> Unit) {
@@ -107,9 +67,10 @@ fun BestCardScreen(best: Rewards.NewBest, sportName: String, contentPadding: Pad
     ) {
         CloseRow(stringResource(R.string.glow_celebrate_personal_best), onContinue)
         Spacer(Modifier.height(24.dp))
-        BadgeArt(
-            RewardsCopy.bestShort(best.best.kind), BestColor, 200.dp, Modifier.align(Alignment.CenterHorizontally), dots = true,
-            under = RewardsCopy.bestValue(best.best.kind, best.best.value),
+        Medal(bestLook(best.best.kind), 200.dp, Modifier.align(Alignment.CenterHorizontally), lit = rememberLightRise(true))
+        Text(
+            RewardsCopy.bestValue(best.best.kind, best.best.value), color = Color.White, style = GlowType.goalValue, maxLines = 1,
+            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
         )
         Spacer(Modifier.height(12.dp))
         Text(RewardsCopy.bestTitle(best.best.kind), color = Color.White, style = GlowType.pageTitle, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
@@ -202,49 +163,24 @@ fun HistoryBadgesScreen(badges: List<Rewards.Badge>, contentPadding: PaddingValu
             pluralStringResource(R.plurals.glow_celebrate_history_badges, badges.size, badges.size),
             color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.body, modifier = Modifier.padding(start = 4.dp),
         )
-        BadgeGrid(badges.map { it to null }, face = face)
-    }
-}
-
-/**
- * The badges on Goals and bests (board AchievementsV1): up to four rings in a row, no panel, the badge's colour as the
- * ring and its text, the name under and its date, or for the next one dim with how far along it is.
- */
-@Composable
-internal fun BadgeRow(badges: List<Pair<Rewards.Badge, String?>>, locked: (Rewards.Badge) -> Boolean, face: (Rewards.Badge) -> String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-        badges.take(4).forEach { (b, note) ->
-            val dim = locked(b)
-            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                BadgeArt(face(b), badgeColor(b.group), 64.dp, locked = dim, ring = true)
-                Text(
-                    if (dim && note != null) note else b.title, color = Color.White.copy(alpha = if (dim) 0.5f else 1f),
-                    style = GlowType.caption, textAlign = TextAlign.Center, maxLines = 2,
-                )
-            }
-        }
-        repeat((4 - badges.size).coerceAtLeast(0)) { Box(Modifier.weight(1f)) }
-    }
-}
-
-/**
- * Badges three to a row, each its art and title; [note] under the title is the date earned or what it needs, [face]
- * what its art reads ([RewardsCopy.face]).
- */
-@Composable
-internal fun BadgeGrid(badges: List<Pair<Rewards.Badge, String?>>, locked: (Rewards.Badge) -> Boolean = { false }, face: (Rewards.Badge) -> String = { it.short }) {
-    QuietPanel {
-        badges.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { (b, note) ->
-                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        BadgeArt(face(b), badgeColor(b.group), 64.dp, locked = locked(b))
-                        Text(b.title, color = Color.White, style = GlowType.secondary, textAlign = TextAlign.Center, maxLines = 2)
-                        note?.let { Text(it, color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.caption, textAlign = TextAlign.Center) }
+        QuietPanel {
+            badges.chunked(HISTORY_PER_ROW).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { b ->
+                        Column(
+                            Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Medal(badgeLook(b, face(b)), 72.dp)
+                            Text(b.title, color = Color.White, style = GlowType.secondary, textAlign = TextAlign.Center, maxLines = 2)
+                        }
                     }
+                    repeat(HISTORY_PER_ROW - row.size) { Box(Modifier.weight(1f)) }
                 }
-                repeat(3 - row.size) { Box(Modifier.weight(1f)) }
             }
         }
     }
 }
+
+/** The badges history earned, three to a row. */
+private const val HISTORY_PER_ROW = 3

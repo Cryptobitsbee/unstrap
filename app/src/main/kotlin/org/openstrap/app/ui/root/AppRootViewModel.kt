@@ -165,11 +165,16 @@ class AppRootViewModel(
         }
     }.state(null)
 
-    /** Goals and bests, All badges and the recap (workouts spec 3.5), once there are workouts. */
+    /**
+     * Goals and bests, All badges and the recap (workouts spec 3.5). The workouts start as an empty list before they
+     * load, so an empty list waits, unless nothing is stored at all ([RewardsKeeper.refresh] tells the two apart the
+     * same way): a new user still gets the page, with the week at nought and the bests and badges to go for, rather
+     * than "Loading" for ever.
+     */
     val rewardsView: StateFlow<RewardsView?> =
         combine(workouts, goals.map { it.workoutsPerWeek }, dao.personalBests(), dao.badges()) { list, goal, bests, earned ->
             RewardsInputs(list, goal, bests, earned)
-        }.filter { it.workouts.isNotEmpty() }
+        }.filter { it.workouts.isNotEmpty() || !dao.anyWorkoutOnce() }
             .mapLatest { i -> catching { rewards.view(i.workouts, i.goal, i.bests, i.earned) }.getOrNull() }
             .flowOn(work)
             .state(null)

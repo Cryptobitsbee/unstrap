@@ -12,7 +12,18 @@
     </plurals>
     <string name="glow_goals_personal_bests">个人最佳</string>
     <string name="glow_goals_no_bests">完成首次运动后，你的最佳记录将显示在这里。</string>
-    <string name="glow_goals_badges_count">徽章，%1$d / %2$d</string>
+    <string name="glow_goals_badges">徽章</string>
+    <string name="glow_goals_next_badge">下一枚徽章</string>
+    <string name="glow_goals_not_set">尚未创下</string>
+    <string name="glow_goals_not_earned">尚未获得</string>
+    <string name="glow_goals_earned_on">获得于 %1$s</string>
+    <string name="glow_goals_badge_described">%1$s，%2$s</string>
+    <string name="glow_goals_counts_rule">由你开始或保留、且时长达到 10 分钟的运动才会计入。</string>
+    <string name="glow_goals_best_fastest_how">所有 GPS 记录的跑步中，你最快的 %1$s。</string>
+    <string name="glow_goals_best_longest_run_how">GPS 记录的单次最远跑步。</string>
+    <string name="glow_goals_best_longest_workout_how">你开始的运动中最长的一次，按运动时间计。</string>
+    <string name="glow_goals_best_lift_how">你为这个动作记录过的最重一组，含次数。</string>
+    <string name="glow_goals_best_steps_how">手环在单日记录到的最多步数。</string>
     <string name="glow_goals_all_badges">全部徽章</string>
     <string name="glow_goals_last_week">上周回顾</string>
     <string name="glow_goals_celebrations">庆祝</string>

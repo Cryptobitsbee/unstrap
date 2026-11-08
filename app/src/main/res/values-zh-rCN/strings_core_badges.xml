@@ -31,4 +31,20 @@
     <string name="core_badge_art_reps">间歇</string>
     <string name="core_badge_art_mind">Om</string>
     <string name="core_badge_art_game">球类</string>
+    <string name="core_badge_how_first_workout">完成你的第一次运动。</string>
+    <string name="core_badge_how_first_10k_steps">单日步行 10,000 步。</string>
+    <string name="core_badge_how_workouts">完成 %1$s 次运动。</string>
+    <string name="core_badge_how_km">在你开始的运动中累计 %1$s km。</string>
+    <string name="core_badge_how_steps_1m">按天累计，步行满一百万步。</string>
+    <string name="core_badge_how_goal_first">首次达成周目标。</string>
+    <string name="core_badge_how_goal_run">连续 %1$s 周达成周目标。进行中的一周不会中断连续记录。</string>
+    <string name="core_badge_how_first_run">完成一次跑步，户外、越野或跑步机均可。</string>
+    <string name="core_badge_how_first_5k">一次跑完 5 km，以 GPS 测量。</string>
+    <string name="core_badge_how_first_10k">一次跑完 10 km，以 GPS 测量。</string>
+    <string name="core_badge_how_first_indoor">完成一次室内有氧运动，器械或泳池均可。</string>
+    <string name="core_badge_how_first_log">在力量训练中记录一组的重量和次数。</string>
+    <string name="core_badge_how_first_tabata">完成一次 Tabata，每轮 20 秒训练、10 秒休息。</string>
+    <string name="core_badge_how_first_reps">完成一次间歇跑，按距离或时间重复，中间休息。</string>
+    <string name="core_badge_how_first_mind">完成一次瑜伽或静心练习。</string>
+    <string name="core_badge_how_first_game">完成一次球类或竞技运动，例如网球、板式网球或攀岩。</string>
 </resources>
