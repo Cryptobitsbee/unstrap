@@ -1,10 +1,11 @@
-# Every push and pull request: run the tests and build a debug APK.
-# A tag like v1.2.3: build the signed release APK and publish it as a GitHub release.
+# Pull requests and pushes to main: the tests, lint and the German-locale tests as three jobs at once, and a debug APK.
+# Branches are checked by their pull requests, so a push to develop with a PR open doesn't run everything twice.
+# A tag like v1.2.3: the same checks, then the signed release APK, published as a GitHub release.
 name: Android
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     tags: ["v*"]
   pull_request:
 
@@ -13,41 +14,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  test:
     # Named, not ubuntu-latest, so the image changes only when this line does (ubuntu-latest moved to 26.04 in Nov 2026).
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: 21
-
-      - uses: gradle/actions/setup-gradle@v5
-
-      - name: Install Android SDK packages
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" > /dev/null
-
-      # Robolectric downloads its Android jar (about 200 MB) from Maven Central into ~/.m2 while the tests run, outside
-      # the Gradle cache. Fetched on every run, it gets rate limited (HTTP 429) and every Robolectric test fails.
-      - uses: actions/cache@v6
-        with:
-          path: ~/.m2/repository/org/robolectric
-          key: robolectric-${{ hashFiles('gradle/libs.versions.toml', 'app/src/test/resources/robolectric.properties') }}
+      - uses: ./.github/actions/setup
 
       - name: Test
         run: ./gradlew :protocol:test :app:testDebugUnitTest
-
-      # Android lint and detekt fail on any finding not in their baselines (app/lint-baseline.xml, */detekt-baseline-*.xml).
-      # detekt checks the debug build only: release differs by four stub files in app/src/release, and checking it too
-      # compiled the whole app a second time, about 5 of this step's 7 minutes.
-      - name: Lint and static analysis
-        run: ./gradlew :app:lintDebug :app:detektDebug :protocol:detektMain
-
-      # A German locale and a zone with a 45 minute offset, so a comma decimal mark or a fixed zone fails the build.
-      - name: Tests under a German locale
-        run: ./gradlew :app:testDebugUnitTest -PtestLocale=de-DE
 
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -55,12 +30,7 @@ jobs:
           name: test-reports
           path: app/build/reports/tests/
 
-      # Only when lint ran: a failed test step stops before it, and a missing report would hide that failure.
-      - uses: github/codeql-action/upload-sarif@v4
-        if: ${{ always() && hashFiles('app/build/reports/lint-results-debug.sarif') != '' }}
-        with:
-          sarif_file: app/build/reports/lint-results-debug.sarif
-
+      # Here, where the debug build is compiled already.
       - name: Build debug APK
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: ./gradlew :app:assembleDebug
@@ -71,8 +41,49 @@ jobs:
           name: unstrap-debug
           path: app/build/outputs/apk/debug/app-debug.apk
 
+  lint:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      # Android lint and detekt fail on any finding not in their baselines (app/lint-baseline.xml, */detekt-baseline-*.xml).
+      # detekt checks the debug build only: release differs by four stub files in app/src/release, and checking it too
+      # compiled the whole app a second time, about 5 of this step's 7 minutes.
+      - name: Lint and static analysis
+        run: ./gradlew :app:lintDebug :app:detektDebug :protocol:detektMain
+
+      # Only when lint ran: a missing report would hide a failure before it.
+      - uses: github/codeql-action/upload-sarif@v4
+        if: ${{ always() && hashFiles('app/build/reports/lint-results-debug.sarif') != '' }}
+        with:
+          sarif_file: app/build/reports/lint-results-debug.sarif
+
+  locale-test:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
+      # A German locale and a zone with a 45 minute offset, so a comma decimal mark or a fixed zone fails the build.
+      - name: Tests under a German locale
+        run: ./gradlew :app:testDebugUnitTest -PtestLocale=de-DE
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: test-reports-de
+          path: app/build/reports/tests/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, lint, locale-test]
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup
+
       - name: Build signed release APK
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           KEYSTORE_BASE64: ${{ secrets.OPENSTRAP_KEYSTORE_BASE64 }}
           OPENSTRAP_KEYSTORE_PASSWORD: ${{ secrets.OPENSTRAP_KEYSTORE_PASSWORD }}
@@ -89,7 +100,6 @@ jobs:
           (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 
       - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         # Hand-written notes in docs/releases/<tag>.md when there are some, else GitHub's list of merged PRs.
