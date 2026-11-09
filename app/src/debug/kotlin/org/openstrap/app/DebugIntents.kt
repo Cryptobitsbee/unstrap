@@ -78,6 +78,7 @@ private fun MainActivity.strapCommands() {
         Toast.makeText(this, "Strap sessions ${if (on) "on" else "off"}", Toast.LENGTH_SHORT).show()
     }
     buzz()
+    workoutCommands()
     // `--es simulate_hr 140x120,80x600 --ei simulate_steps 0 --ei simulate_battery 80` plays heart rate as a connected
     // strap (emulator).
     val simulate = intent.getStringExtra("simulate_hr") ?: return
@@ -87,6 +88,36 @@ private fun MainActivity.strapCommands() {
     }
     manager?.simulate(script, intent.getIntExtra("simulate_steps", 0), intent.getIntExtra("simulate_battery", SIMULATED_BATTERY))
 }
+
+/**
+ * `--es workout start:24` starts a phone workout of that sport (no GPS), `pause`, `resume` and `end` drive it, so the
+ * strap session (0x0019) can be tried from adb. `--ez strap_reconnect true` drops the link and connects again 3 s later.
+ */
+private fun MainActivity.workoutCommands() {
+    intent.getStringExtra("workout")?.let { cmd ->
+        intent.removeExtra("workout")
+        val w = container.workout
+        Log.i(TAG, "debug workout $cmd")
+        when {
+            cmd.startsWith("start:") -> cmd.substringAfter(':').toIntOrNull()?.let { w.start(sportType = it) }
+            cmd == "pause" -> w.pause()
+            cmd == "resume" -> w.resume()
+            cmd == "end" -> w.end()
+        }
+    }
+    if (intent.getBooleanExtra("strap_reconnect", false)) {
+        intent.removeExtra("strap_reconnect")
+        val strap = container.strap
+        Log.i(TAG, "debug reconnect")
+        strap.disconnect()
+        lifecycleScope.launch {
+            kotlinx.coroutines.delay(RECONNECT_WAIT_MS)
+            strap.connect()
+        }
+    }
+}
+
+private const val RECONNECT_WAIT_MS = 3_000L
 
 /** `--es buzz AboveTarget` plays a cue's pattern on the strap (a Cue name or Stop), to feel it. */
 private fun MainActivity.buzz() {

@@ -472,9 +472,8 @@ class StrapManager(
 
     /** The sport module's own pushes (its replies, `10 …`, go to their requests). */
     private fun CoroutineScope.watchSportSession(s: ChannelSession) = launch {
-        commands.forgetSportCaps()
         if (!s.services.has(SportSession.ENDPOINT)) return@launch
-        launch { commands.querySportVersion() }
+        launch { commands.querySportVersion(s) }
         s.messagesFor(SportSession.ENDPOINT).collect { p ->
             if (p.isNotEmpty() && p.u8(0) == SportSession.REPLY) return@collect
             log("sport < ${p.toHex()}")

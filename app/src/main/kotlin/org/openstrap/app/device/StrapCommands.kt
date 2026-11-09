@@ -2,6 +2,7 @@ package org.openstrap.app.device
 
 import androidx.annotation.StringRes
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.withLock
 import org.openstrap.app.R
 import org.openstrap.app.data.catching
 import org.openstrap.app.i18n.Strings
@@ -134,25 +135,26 @@ internal class StrapCommands(
         SettingsCodec.parse(reply, settingsProtocol?.version)?.get(SettingsCodec.KEY_FAST_RECHARGE)?.bool
     }.onFailure { log("fast-charge query failed: $it") }.getOrNull()
 
-    /** Learned on each connection ([querySportVersion]), or else with the first workout command on it. */
-    @Volatile private var sportCaps: SportSession.Capabilities? = null
+    /**
+     * The sport module's version for the session it was read on. Asked once per connection, under [sportVersionLock],
+     * so a workout command that comes first waits for the connect's `01` and the version is never asked twice.
+     */
+    private var sportCaps: Pair<ChannelSession, SportSession.Capabilities>? = null
+    private val sportVersionLock = kotlinx.coroutines.sync.Mutex()
 
-    /** A new connection: the sport module's version is asked again. */
-    fun forgetSportCaps() {
-        sportCaps = null
-    }
-
-    /** Zepp's `wok.s0` on every connect: 0x0019 `01`, kept for the workout commands. A failure is only logged. */
-    suspend fun querySportVersion() {
-        val s = link.activeSession ?: return
-        if (!s.services.has(SportSession.ENDPOINT)) return
-        catching {
+    private suspend fun sportCaps(s: ChannelSession): SportSession.Capabilities? = sportVersionLock.withLock {
+        sportCaps?.takeIf { it.first === s }?.second ?: catching {
             val r = s.request(SportSession.ENDPOINT, SportSession.versionRequest, COMMAND_TIMEOUT_MS) {
                 SportSession.isReplyTo(SportSession.versionRequest, it)
             }
             log("sport version ${r.toHex()}")
-            SportSession.parseVersion(r)?.let { sportCaps = it }
-        }.onFailure { log("sport version not read: $it") }
+            SportSession.parseVersion(r)
+        }.onFailure { log("sport version not read: $it") }.getOrNull()?.also { sportCaps = s to it }
+    }
+
+    /** Zepp's `wok.s0` on every connect: 0x0019 `01`, kept for the workout commands. A failure is only logged. */
+    suspend fun querySportVersion(s: ChannelSession) {
+        if (s.services.has(SportSession.ENDPOINT)) sportCaps(s)
     }
 
     /** 0x0019 `06 00`, the strap's workout status; null when it doesn't answer or refuses. */
@@ -179,11 +181,7 @@ internal class StrapCommands(
             if (!SportSession.isOk(reply)) throw StrapCommandException(R.string.system_command_workout_refused)
             return reply
         }
-        val caps = sportCaps
-            ?: (
-                SportSession.parseVersion(send(SportSession.versionRequest))
-                    ?: throw StrapCommandException(R.string.system_command_sport_version)
-                ).also { sportCaps = it }
+        val caps = sportCaps(s) ?: throw StrapCommandException(R.string.system_command_sport_version)
         // Zepp's `bo60.j`: the config before START, and before whatever state goes out again on a reconnect.
         if (state == SportSession.State.START || reconnect) send(SportSession.config(sportType, caps))
         send(SportSession.state(state, startTime, elapsedSeconds, caps))
