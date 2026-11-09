@@ -56,7 +56,10 @@
     <string name="you_health_above">高于 %1$d</string>
     <string name="you_health_low">低心率提醒</string>
     <string name="you_health_below">低于 %1$d</string>
+    <string name="you_health_auto_oxygen">自动血氧监测</string>
+    <string name="you_health_auto_oxygen_note">静息时自动测量</string>
     <string name="you_health_oxygen">低血氧提醒</string>
+    <string name="you_health_oxygen_note">需要先开启自动血氧监测。</string>
     <string name="you_health_below_percent">低于 %1$d%%</string>
     <string name="you_health_note">触发提醒时手环会振动。unstrap 并非医疗设备。</string>
     <string name="you_phone_summary_both">来电与通知</string>
