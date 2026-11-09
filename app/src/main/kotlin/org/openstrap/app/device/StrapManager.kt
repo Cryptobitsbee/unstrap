@@ -145,8 +145,9 @@ class StrapManager(
     private suspend inline fun <T> step(name: String, block: () -> T): T? = setupStep(name, { log(it) }, block)
 
     /**
-     * The setup after auth, in Zepp 10.10.5's order (codemap zepp-connected-traffic-10.10.5 §6.2): time version, the
-     * clock (a failure drops the link, as in Zepp), settings version, battery, then device information. Each other
+     * The setup after auth, in Zepp 10.10.5's order (analysis/protocol verdict 16, `sv0` then `nrt.N`): time version,
+     * the clock (a failure drops the link, as in Zepp), settings version, battery, device information, then the device
+     * info read: the 180A strings, the feature bitmap (0x0028 `01`) and the connect params (0x0015 `01`). Each other
      * failed step is logged and setup goes on without it.
      */
     private suspend fun afterAuth(client: GattClient, s: ChannelSession) {
@@ -155,14 +156,24 @@ class StrapManager(
         querySettingsVersion(s)
         readBattery(client, s)
         val deviceInformation = queryDeviceInformation(s)
-        queryFeatures(s)
         readDeviceInfo(client, s, deviceInformation)
+        queryFeatures(s)
+        queryMtu(s)
     }
 
-    /**
-     * The strap's payload MTU, as it pushes it (`02 n u16`, 03 §3.2). Zepp listens for it and sends no query on
-     * connect, so the link stays at the strap's 20 bytes until a push. Ends with the connection.
-     */
+    /** Zepp's `nrt.Z`: 0x0015 `01` on every connect, the reply `02 n u16` sets the link's payload MTU. */
+    private suspend fun queryMtu(s: ChannelSession) {
+        val l = connections.link ?: return
+        if (!s.services.has(Endpoints.CONNECT)) return
+        step("connect params query") {
+            val r = s.request(Endpoints.CONNECT, ConnectCodec.MTU_QUERY, 5_000) { it.size >= 3 && it.u8(0) == MTU_PUSH }
+            val n = r.u8(1) or (r.u8(2) shl 8)
+            if (n + 3 in 23..247) l.payloadMtu = n
+            log("strap payload mtu=$n")
+        }
+    }
+
+    /** The strap's payload MTU when it changes later (`02 n u16`, unsolicited). Ends with the connection. */
     private fun CoroutineScope.watchMtu(s: ChannelSession) = launch {
         val l = connections.link ?: return@launch
         if (!s.services.has(Endpoints.CONNECT)) return@launch
@@ -529,7 +540,9 @@ class StrapManager(
                 }
             }
         }
-        // On connect: notify on only with the app in front or a phone workout recording, else nothing (`yt00.d`).
+        // Every connect, in front or not: one `03` ("connected step:", `lok.s0`). Then notify on only with the app in
+        // front or a phone workout recording (`yt00.d`).
+        querySteps(s)
         if (appVisible || workoutActive) stepsNotify(s, on = true) else log("steps: connected in the background, notify left off")
     }
 
@@ -722,6 +735,8 @@ class StrapManager(
             // A failure is logged and handed on to the Firmware page. A cancellation is rethrown by catching as it came.
             catching {
                 if (live.isRunning) live.pause()
+                // Zepp asks for high connection priority only for a firmware transfer (`f4c`), never on a normal link.
+                client.requestHighPriority()
                 val link = GattDfuLink(client)
                 if (!link.available) throw DfuException(-1, Strings.app.get(R.string.system_firmware_no_service))
                 // Bigger ATT packets make the transfer several times faster. Refused, it falls back to 20-byte writes.
