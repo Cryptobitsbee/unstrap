@@ -27,6 +27,16 @@ private class SimulatedGdspStrap(private val workouts: Map<Long, Pair<ByteArray,
     var silentStarts = 0
     /** Number of STARTs to refuse with INVALID_STATE, as when an earlier START is still open. */
     var invalidStateStarts = 0
+    /** A status for the next START reply instead of success. */
+    var nextStatus: Int? = null
+    /** Leave out the packet with this index in the next transfer. */
+    var dropPacket: Int? = null
+    /** Send every packet twice in the next transfer. */
+    var doublePackets = false
+    /** Send a wrong CRC in the next `10 02`. */
+    var badCrc = false
+    /** A fixed header time for every START reply. */
+    var header: Long? = null
     /** Pushed `11 <type>` before the next START reply. */
     var pushBeforeStart: Int? = null
     private var pending: ByteArray? = null
@@ -41,20 +51,29 @@ private class SimulatedGdspStrap(private val workouts: Map<Long, Pair<ByteArray,
                 if (fastRecharge) return reply(byteArrayOf(0x10, 1, GdspStatus.FAST_RECHARGE_MODE.code.toByte()))
                 if (silentStarts > 0) { silentStarts--; return }
                 if (invalidStateStarts > 0) { invalidStateStarts--; return reply(byteArrayOf(0x10, 1, GdspStatus.INVALID_STATE.code.toByte())) }
+                nextStatus?.let { nextStatus = null; return reply(byteArrayOf(0x10, 1, it.toByte())) }
                 val track = workouts.keys.sorted().firstOrNull { it >= since }
                 val payload = track?.let { workouts.getValue(it).let { (s, d) -> if (type == 5) s else if (type == 6) d else null } }
                 pending = payload
                 val w = ByteWriter().u8(0x10).u8(1).u8(1).u32((payload?.size ?: 0).toLong())
-                GdspTime.of(track ?: since, ZoneOffset.UTC).writeTo(w)
+                GdspTime.of(header ?: track ?: since, ZoneOffset.UTC).writeTo(w)
                 reply(w.u8(0).toByteArray())
             }
             FetchCodec.OP_TRANSFER -> {
                 val p = pending ?: ByteArray(0)
-                p.toList().chunked(19).forEachIndexed { i, c -> data.send(byteArrayOf(i.toByte()) + c.toByteArray()) }
-                reply(ByteWriter().u8(0x10).u8(2).u8(1).u32(crc32(p)).toByteArray())
+                p.toList().chunked(19).forEachIndexed { i, c ->
+                    if (i == dropPacket) return@forEachIndexed
+                    val packet = byteArrayOf(i.toByte()) + c.toByteArray()
+                    data.send(packet)
+                    if (doublePackets) data.send(packet)
+                }
+                dropPacket = null
+                doublePackets = false
+                reply(ByteWriter().u8(0x10).u8(2).u8(1).u32(crc32(p) xor if (badCrc) 1L else 0L).toByteArray())
+                badCrc = false
             }
             FetchCodec.OP_ACK -> {
-                acks += bytes.getOrNull(1)?.toInt()
+                acks += bytes.getOrNull(1)?.toInt()?.and(0xFF)
                 pending = null
                 reply(byteArrayOf(0x10, 3, 1))
             }
@@ -95,14 +114,15 @@ class GdspClientTest {
     }
 
     @Test
-    fun fastRechargeModeStopsTheFetch() = runTest {
+    fun fastRechargeIsAcknowledgedWith33() = runTest {
         val strap = strap().apply { fastRecharge = true }
         val client = GdspClient(strap::send, strap.control, strap.data)
-        val e = runCatching { client.fetchWorkout(trackId, zone) }.exceptionOrNull()
-        assertTrue("got $e", e is FastRechargeModeException)
-        assertTrue(runCatching { client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone) }.exceptionOrNull() is FastRechargeModeException)
-        // A refusal owes no ACK.
-        assertTrue(strap.acks.isEmpty())
+        val w = client.fetchWorkout(trackId, zone) as WorkoutFetch.Failed
+        assertTrue(w.fastRecharge)
+        val f = client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone) as GdspFetch.Failed
+        assertTrue(f.fastRecharge)
+        // Zepp closes every START with an ACK carrying the result, a refusal too.
+        assertEquals(listOf<Int?>(0x33, 0x33), strap.acks)
     }
 
     @Test
@@ -124,36 +144,36 @@ class GdspClientTest {
     }
 
     @Test
-    fun anUnansweredStartIsLogged() = runTest {
+    fun anUnansweredStartIsAcknowledgedWith04() = runTest {
         val strap = strap().apply { silentStarts = 1 }
         val logs = mutableListOf<String>()
         val client = GdspClient(strap::send, strap.control, strap.data, log = { logs += it })
-        assertTrue(client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone) is GdspFetch.Failed)
-        assertTrue(logs.toString(), logs.any { it.startsWith("history: start ${HistoryDataType.ACTIVITY.code}: ") && "no reply" in it })
-    }
-
-    @Test
-    fun unansweredStartFailsTheTypeAndIsClosed() = runTest {
-        val strap = strap().apply { silentStarts = 1 }
-        val client = GdspClient(strap::send, strap.control, strap.data)
         // A timeout must not surface as a cancellation, which would abort the whole sync.
-        assertTrue(client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone) is GdspFetch.Failed)
-        assertEquals(listOf<Int?>(GdspStatus.TIMEOUT.code), strap.acks)
-        // The next type still works.
+        val f = client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone)
+        assertEquals(GdspStatus.OPERATION_FAILED.code, (f as GdspFetch.Failed).ack)
+        assertTrue(logs.toString(), logs.any { it.startsWith("history: start ${HistoryDataType.ACTIVITY.code}: ") && "no reply" in it })
+        // The next exchange still works.
         assertEquals(GdspFetch.Empty, client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone))
+        assertEquals(listOf<Int?>(4, 1), strap.acks)
     }
 
     @Test
-    fun invalidStateClosesTheOpenFetchAndRetriesOnce() = runTest {
+    fun aRefusedStartIsAcknowledgedWithItsStatus() = runTest {
         val strap = strap().apply { invalidStateStarts = 1 }
         val client = GdspClient(strap::send, strap.control, strap.data)
-        assertEquals(GdspFetch.Empty, client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone))
-        assertEquals(2, strap.starts.size)
-        assertEquals(listOf<Int?>(GdspStatus.CANCELLED_BY_APP.code, 1), strap.acks)
-
-        strap.invalidStateStarts = 2
         val f = client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone)
-        assertEquals(GdspStatus.INVALID_STATE, (f as GdspFetch.Refused).status)
+        assertEquals(GdspStatus.INVALID_STATE.code, (f as GdspFetch.Failed).ack)
+        // One START, no retry inside the exchange: the caller's loop retries.
+        assertEquals(1, strap.starts.size)
+        assertEquals(listOf<Int?>(5), strap.acks)
+    }
+
+    @Test
+    fun anUnknownStartStatusCountsAsSuccess() = runTest {
+        val strap = strap().apply { nextStatus = 0x77 }
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        assertEquals(GdspFetch.Empty, client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone))
+        assertEquals(listOf<Int?>(1), strap.acks)
     }
 
     @Test
@@ -162,5 +182,42 @@ class GdspClientTest {
         val client = GdspClient(strap::send, strap.control, strap.data)
         assertEquals(GdspFetch.Empty, client.fetch(HistoryDataType.ACTIVITY.code, trackId, zone))
         assertEquals(listOf<Int?>(1), strap.acks)
+    }
+
+    @Test
+    fun aMissingPacketIsAcknowledgedWith06() = runTest {
+        val strap = strap().apply { dropPacket = 2 }
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        val f = client.fetch(5, trackId, zone)
+        assertEquals(GdspStatus.PACKET_INDEX_ERROR.code, (f as GdspFetch.Failed).ack)
+        assertEquals(listOf<Int?>(6), strap.acks)
+    }
+
+    @Test
+    fun aRepeatedPacketIsIgnored() = runTest {
+        val strap = strap().apply { doublePackets = true }
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        val c = client.fetch(5, trackId, zone) as GdspFetch.Chunk
+        assertEquals(fixture("summary_5.bin").toList(), c.payload.toList())
+        assertEquals(listOf<Int?>(1), strap.acks)
+    }
+
+    @Test
+    fun aWrongCrcIsAcknowledgedWith08() = runTest {
+        val strap = strap().apply { badCrc = true }
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        assertEquals(GdspStatus.CRC_MISMATCH.code, (client.fetch(5, trackId, zone) as GdspFetch.Failed).ack)
+        assertEquals(listOf<Int?>(8), strap.acks)
+    }
+
+    @Test
+    fun aHeaderNotLaterAfterTheCursorMovedIsCyclic() = runTest {
+        val strap = strap().apply { header = trackId }
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        val f = client.fetch(5, trackId - 60, zone, PreviousChunk(trackId - 120, trackId)) as GdspFetch.Failed
+        assertTrue(f.cyclic)
+        assertEquals(listOf<Int?>(0xFA), strap.acks)
+        // The same cursor again is not cyclic.
+        assertTrue(client.fetch(5, trackId - 60, zone, PreviousChunk(trackId - 60, trackId)) is GdspFetch.Chunk)
     }
 }

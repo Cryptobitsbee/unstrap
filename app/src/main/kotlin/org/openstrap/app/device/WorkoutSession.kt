@@ -22,7 +22,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import org.openstrap.app.data.AutoStart
 import org.openstrap.app.data.HeartZones
 import org.openstrap.app.data.RecoveryEngine
 import org.openstrap.app.data.WorkoutRecorder
@@ -185,7 +184,7 @@ class WorkoutSession(
     private var wake: PowerManager.WakeLock? = null
 
     /**
-     * Picks up a workout left recording when the process died, then starts watching for auto-start. Called once at app
+     * Picks up a workout left recording when the process died. Called once at app
      * start. One with no reading for [LEFT_RECORDING_S] records on too, while it waits for the strap's history of the
      * time the phone missed ([awaitStrap]). One paused that long is ended at its last reading, and its summary shows.
      */
@@ -240,8 +239,6 @@ class WorkoutSession(
                 waiting?.let { scope.launch { awaitStrap(it) } }
             } finally {
                 _restored.value = true
-                // After the restore, so a workout left recording isn't offered as a new one.
-                autoStart.watch()
             }
         }
     }
@@ -250,7 +247,7 @@ class WorkoutSession(
         sportType: Int, askToEnd: Boolean = true, target: org.openstrap.app.data.WorkoutTarget? = null,
         useGps: Boolean = false, keepRoute: Boolean = false,
         rest: org.openstrap.app.data.Strength.Rest? = null, setsTarget: Int? = null,
-        /** Auto-start: the workout began here, earlier, and [seed] holds its live readings so far. */
+        /** Started late: the workout began here, earlier, and [seed] holds its live readings so far. */
         from: Long? = null, seed: List<Pair<Long, Int>> = emptyList(), seedSteps: Int? = null,
         /** Strength: a log card after each set. Rounds or periods ([AppWorkout.structure]). */
         logSets: Boolean = false, structure: String? = null,
@@ -276,7 +273,7 @@ class WorkoutSession(
                 _zoneSeconds.value = List(org.openstrap.app.data.Workouts.ZONES) { 0 }
                 lastReading = null
                 _kcal.value = null
-                // Auto-start: the strap's total where the effort began, so the steps since count.
+                // Started late: the strap's total where the effort began, so the steps since count.
                 stepTotals = listOfNotNull(seedSteps?.let { w.start to it })
                 window = emptyList()
                 askSince = w.start
@@ -285,24 +282,6 @@ class WorkoutSession(
             }
         }
     }
-
-    /** "Looks like a workout": auto-start's offer, the strap's effort watch and what is recorded from it. */
-    private val autoStart = AutoStartWatcher(
-        dao, settings, strap, _state, callRinging, ::maxHeartRate,
-        record = { o, seed, seedSteps -> start(o.sportType, from = o.start, seed = seed, seedSteps = seedSteps) },
-        clock = clock, scope = scope,
-    )
-
-    /**
-     * "Looks like a workout" ([AutoStart]): an effort under way that nobody started, while the question is open.
-     * The strap buzzes once as it is asked; the notification and the Today and Activity tabs ask it.
-     */
-    val offer: StateFlow<AutoStart.Offer?> = autoStart.offer
-
-    /** "Record": the workout starts where the effort began, with the readings since. */
-    fun recordOffer() = autoStart.recordOffer()
-
-    fun declineOffer() = autoStart.declineOffer()
 
     fun pause() = pauseFrom(toStrap = true)
 
@@ -340,6 +319,16 @@ class WorkoutSession(
      * (codemap 05 §5, 03 §3.20). The strap's own pause and stop (`11`) and ABANDON are followed but untried on hardware.
      */
 
+    /**
+     * The one state a reconnect sends after the config, as Zepp picks it from its engine state (verdict 25,
+     * d/bo60.java:472-480): PAUSE while paused, RESUME once resumed from a pause, else START with the original start.
+     */
+    internal fun reconnectState(w: AppWorkout) = when {
+        w.pausedAt != null -> org.openstrap.protocol.services.SportSession.State.PAUSE
+        w.pauseRanges.isNotEmpty() -> org.openstrap.protocol.services.SportSession.State.RESUME
+        else -> org.openstrap.protocol.services.SportSession.State.START
+    }
+
     /** Read at each start: whether a phone workout also runs a session on the strap ([SettingsStore.strapSessions]). */
     @Volatile private var strapSessions = true
     private var keepAlive: Job? = null
@@ -348,11 +337,16 @@ class WorkoutSession(
      * Tells the strap's sport module, when that's on; a failure is logged and the phone recording carries on. [send]
      * false when the strap made the change itself: nothing goes out, but a pause still gets its keep-alive.
      */
-    private fun strapState(state: org.openstrap.protocol.services.SportSession.State, w: AppWorkout, send: Boolean = true) {
+    private fun strapState(
+        state: org.openstrap.protocol.services.SportSession.State,
+        w: AppWorkout,
+        send: Boolean = true,
+        reconnect: Boolean = false,
+    ) {
         if (!strapSessions) return
         val elapsed = WorkoutRecorder.activeSeconds(w, now())
         if (send) scope.launch {
-            catching { strap.sportSession(state, w.sportType, w.start, elapsed) }
+            catching { strap.sportSession(state, w.sportType, w.start, elapsed, reconnect) }
                 .onFailure { (strap as? StrapManager)?.log("strap session $state not sent: ${it.message}") }
         }
         keepAlive?.cancel()
@@ -383,7 +377,17 @@ class WorkoutSession(
         }
         if (p is org.openstrap.protocol.services.SportSession.Push.Status && p.status == org.openstrap.protocol.services.SportSession.STATUS_HR_NORMAL) {
             if (r.paused || !r.workout.askToEnd || r.endPrompt != null) return
-            askToEnd(WorkoutRecorder.lastActive(window, steps, restingHr, r.maxHeartRate)?.takeIf { it > r.workout.start } ?: now())
+            // As Zepp (`lak.f`, `bo60.m`): the strap's workout status first, and the question only once it answers.
+            scope.launch {
+                val status = strap.sportStatus()
+                if (status == null) {
+                    log("workout: no strap status, no end question")
+                    return@launch
+                }
+                log("workout: strap status ${status.status}, asking to end")
+                val rec = _state.value as? WorkoutState.Recording ?: return@launch
+                askToEnd(WorkoutRecorder.lastActive(window, steps, restingHr, rec.maxHeartRate)?.takeIf { it > rec.workout.start } ?: now())
+            }
         }
     }
 
@@ -459,8 +463,6 @@ class WorkoutSession(
                     return@withLock
                 }
                 left = null
-                // The heart rate stays up for a while after a workout, and that's not a new one to offer.
-                autoStart.offerNotBefore = now()
                 strapState(WorkoutRecorder.closingState(kept), w, send = toStrap)
                 keepAlive?.cancel()
                 stop(keepLive = true)
@@ -481,8 +483,7 @@ class WorkoutSession(
                 editor.refreshDays(ended.from, end)
                 onSaved(w.start)
             }
-            // The strap's history fills any minutes the phone missed; it batches, so ask now.
-            strap.syncNow()
+            // No sync of its own: Zepp starts none after a phone workout, the strap's history comes with the next one.
         }
     }
 
@@ -545,7 +546,7 @@ class WorkoutSession(
      */
     private suspend fun awaitStrap(l: LeftRecording.Left) {
         log("workout left recording since ${java.time.Instant.ofEpochSecond(l.leftAt)}: waiting for the strap's history")
-        strap.syncNow()
+        // No sync of its own (Zepp has none): the next one the usual rules start brings the history in.
         val v = withTimeoutOrNull(leftWaitMs) {
             // Once at the start too, for a history already in.
             strap.syncEnded.onSubscription { emit(Unit) }.map { judge(l, final = false) }.first { it != LeftRecording.Verdict.Wait }
@@ -929,7 +930,7 @@ class WorkoutSession(
     private fun track() = WorkoutDistance.Track(_route.value, stepTotals, heightCm, routeSince, stepsSince, before)
 
     /**
-     * Starts recording [w]: its state is [setup] of a fresh one, and [seed] (auto-start's readings so far) is recorded
+     * Starts recording [w]: its state is [setup] of a fresh one, and [seed] (the readings so far, when started late) is recorded
      * before the live readings start, so [record] only ever runs on one coroutine at a time.
      */
     private suspend fun begin(
@@ -960,13 +961,12 @@ class WorkoutSession(
             launch { strap.heartRateReadings.collect(::onReading) }
             if (strapSessions) {
                 launch { strap.sportSessionPushes.collect(::onStrapPush) }
-                // On every connect, START again with the original start (Zepp's resume after a disconnect), then pause if paused.
+                // On every connect, the workout again as Zepp's `bo60.j(2)`: the config, then one state.
                 launch {
                     strap.connection.collect { c ->
                         if (c !is ConnectionState.Connected) return@collect
                         val now = (_state.value as? WorkoutState.Recording)?.workout ?: return@collect
-                        strapState(org.openstrap.protocol.services.SportSession.State.START, now)
-                        if (now.pausedAt != null) strapState(org.openstrap.protocol.services.SportSession.State.PAUSE, now)
+                        strapState(reconnectState(now), now, reconnect = true)
                     }
                 }
             }
@@ -1239,8 +1239,6 @@ class WorkoutSession(
         val STOP_BUZZ = listOf(500, 250, 500)
         /** Only if the max-HR model can't run; 190 is Tanaka's estimate at 25. */
         const val DEFAULT_MAX_HR = 190
-        /** Auto-start's offer ([AutoStartWatcher]): three short pulses, unlike the stop question's two long ones. */
-        val OFFER_BUZZ = listOf(150, 150, 150, 150, 150)
         /** Saved workouts kept (workouts spec 2.5). */
         const val MAX_SAVED = 10
         /** "+10 s" on an interval's rest. */

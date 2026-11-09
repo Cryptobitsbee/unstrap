@@ -69,4 +69,15 @@ class SportSessionTest {
         // No hr field: neither a reading nor "no reading".
         assertEquals(Push.Data(null), SportSession.parsePush("14 00 04000000 4b000000".hexToBytes()))
     }
+
+    @Test
+    fun statusQueryAndReplyAsZepp() {
+        assertArrayEquals(byteArrayOf(0x06, 0x00), SportSession.statusQuery)
+        assertEquals(
+            SportSession.DeviceStatus(status = 0, trackId = 0x6730_0000L, sportType = 8),
+            SportSession.parseStatus("10 06 01 00 00 00 00 30 67 08".hexToBytes()),
+        )
+        assertNull(SportSession.parseStatus("10 06 02 00 00 00 00 30 67 08".hexToBytes()))
+        assertNull(SportSession.parseStatus("10 06 01 00".hexToBytes()))
+    }
 }

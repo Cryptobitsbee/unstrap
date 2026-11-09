@@ -216,7 +216,6 @@ class GattClient(
             gatt = g
             g != null
         }
-        requireGatt().requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
         if (refreshCache) {
             // Hidden API, but the only way to force re-discovery; harmless if it fails.
             val g = requireGatt()
@@ -224,6 +223,11 @@ class GattClient(
             kotlinx.coroutines.delay(500)
         }
         op<Unit>(Op.DISCOVER) { requireGatt().discoverServices() }
+    }
+
+    /** High connection priority, for a firmware transfer only: Zepp leaves the strap's normal link as it comes. */
+    fun requestHighPriority() {
+        gatt?.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
     }
 
     suspend fun requestMtu(size: Int): Int {

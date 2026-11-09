@@ -19,6 +19,8 @@ object SportSession {
     const val STATE = 0x03
     /** Sent every [KEEP_ALIVE_MS] while the workout is paused. */
     const val PAUSE_KEEP_ALIVE = 0x05
+    /** `06 00`: the strap's own workout status, asked when it says heart rate is back to normal. */
+    const val STATUS_QUERY = 0x06
     const val KEEP_ALIVE_MS = 5_000L
 
     /** Pushed by the strap: a state change it made itself, live data, a status. */
@@ -41,6 +43,21 @@ object SportSession {
 
     val versionRequest: ByteArray = bytesOf(VERSION)
     val pauseKeepAlive: ByteArray = bytesOf(PAUSE_KEEP_ALIVE)
+    val statusQuery: ByteArray = bytesOf(STATUS_QUERY, 0x00)
+
+    /** The strap's reply to [statusQuery] (Zepp's `h0d`): its workout [status], [trackId] and [sportType]. */
+    data class DeviceStatus(val status: Int, val trackId: Long, val sportType: Int)
+
+    /** `10 06 01 <skip u8> <status u8> <trackId u32> <sportType u8>`; null unless OK and complete. */
+    fun parseStatus(reply: ByteArray): DeviceStatus? {
+        if (reply.size < STATUS_REPLY_SIZE || !isReplyTo(statusQuery, reply) || !isOk(reply)) return null
+        val r = ByteReader(reply, STATUS_FIELDS_AT)
+        r.u8()
+        return DeviceStatus(r.u8(), r.u32(), r.u8())
+    }
+
+    private const val STATUS_REPLY_SIZE = 10
+    private const val STATUS_FIELDS_AT = 3
 
     /** True for the reply to [request]: `10 <its opcode> …`. */
     fun isReplyTo(request: ByteArray, reply: ByteArray): Boolean =

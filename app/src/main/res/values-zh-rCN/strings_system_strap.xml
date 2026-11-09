@@ -52,6 +52,7 @@
     <string name="system_sync_kind_heart_points">心率积分</string>
     <string name="system_sync_kind_skin_temperature">皮肤温度</string>
     <string name="system_sync_kind_workouts">运动记录</string>
+    <string name="system_sync_kind_strap_stats">手环统计</string>
     <string name="system_sync_kind_other">其他数据</string>
     <string name="system_sync_fast_charge">手环处于快充模式。请在退出快充模式后重新同步。</string>
     <string name="system_sync_link_dropped">与手环的蓝牙连接已断开。</string>

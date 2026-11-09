@@ -150,6 +150,15 @@ class ChannelSession(
         log("services: " + services.endpoints.entries.joinToString { "%04x%s".format(it.key, if (it.value) "*" else "") })
         if (!services.has(Endpoints.AUTH)) throw ProtocolException("Strap does not offer the v2 auth endpoint")
 
+        // Zepp asks for the authorization info first on every connect (`eqe0.l`, 15 s) and goes on to the key
+        // exchange without it, so a missing reply is only logged.
+        try {
+            val info = authRequest(Auth.CMD_INFO, byteArrayOf(Auth.CMD_INFO.toByte()))
+            log("auth info ${info.toHex()}")
+        } catch (e: ProtocolTimeoutException) {
+            log("auth info: ${e.message}")
+        }
+
         val hs = AuthHandshake(authKey)
         val step1 = authRequest(Auth.CMD_KEY_EXCHANGE, hs.step1Request)
         val step2 = authRequest(Auth.CMD_PROVE, hs.handleStep1Reply(step1))

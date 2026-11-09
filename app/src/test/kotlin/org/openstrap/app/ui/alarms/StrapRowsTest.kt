@@ -38,6 +38,19 @@ class StrapRowsTest {
         )
     }
 
+    @Test fun `the oxygen alert counts only with auto blood oxygen on, as Zepp gates it`() {
+        fun group(auto: Boolean) = SettingsGroup(
+            0, 1,
+            mapOf(
+                SettingsCodec.KEY_SMART_SPO2 to SettingsCodec.boolSetting(SettingsCodec.KEY_SMART_SPO2, auto),
+                SettingsCodec.KEY_LOW_SPO2_ALERT to SettingsCodec.enumSetting(SettingsCodec.KEY_LOW_SPO2_ALERT, 90),
+            ),
+        )
+        assertEquals("Oxygen below 90%", healthAlertsSummary(AlarmsUiState(health = group(auto = true))))
+        assertEquals("Off", healthAlertsSummary(AlarmsUiState(health = group(auto = false))))
+        assertEquals(false, AlarmsUiState(health = group(auto = false)).oxygenAlertAvailable)
+    }
+
     @Test fun `phone alerts in words`() {
         assertEquals("Calls and notifications", phoneAlertsSummary(calls = true, notifications = true))
         assertEquals("Calls", phoneAlertsSummary(calls = true, notifications = false))
