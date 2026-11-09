@@ -48,9 +48,17 @@ data class AlarmsUiState(
 
     /** The strap only raises HR alerts while it measures often enough; Zepp allows continuous or every minute. */
     val alertsAvailable: Boolean get() = health?.get(SettingsCodec.KEY_HR_INTERVAL)?.number?.toInt().let { it == SettingsCodec.HR_CONTINUOUS || it == 1 }
+
+    /**
+     * The low blood oxygen alert works only with auto blood oxygen (HEALTH key 0x31) on, as Zepp gates its row
+     * (`zas`). A strap that doesn't report the switch keeps the alert open.
+     */
+    val oxygenAlertAvailable: Boolean get() = health?.get(SettingsCodec.KEY_SMART_SPO2)?.bool != false
 }
 
 /** Reads alarms and health settings from the strap and writes changes back, re-reading after each write. */
+// One function per strap setting the page changes, plus the read and the write queue.
+@Suppress("TooManyFunctions")
 class AlarmsViewModel(private val strap: StrapController) : ViewModel() {
     private val _state = MutableStateFlow(AlarmsUiState())
     val state = _state.asStateFlow()
@@ -109,6 +117,8 @@ class AlarmsViewModel(private val strap: StrapController) : ViewModel() {
     }
 
     fun setEnum(key: Int, value: Int) = writeHealth { listOf(SettingsCodec.enumSetting(key, value)) }
+
+    fun setAutoOxygen(on: Boolean) = writeHealth { listOf(SettingsCodec.boolSetting(SettingsCodec.KEY_SMART_SPO2, on)) }
 
     private fun writeHealth(build: (SettingsGroup) -> List<Setting>) = run {
         val g = _state.value.health ?: throw StrapCommandException(Strings.app.get(R.string.you_alarms_not_loaded))

@@ -51,9 +51,12 @@ object HistoryTypeSpecs {
         HistoryTypeSpec(HistoryDataType.OSA_RESULT, 15, HistoryParsers.osaResult),
         // Not in the recommended list; parsers exist for completeness.
         HistoryTypeSpec(HistoryDataType.HEART_RATE_MANUAL, 16, HistoryParsers.spotHr),
-        HistoryTypeSpec(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT, 17, HistoryParsers.sleepRespiratoryEvent),
+        // Zepp queues one START for breath events right after breath rate's and ignores its result (`stk`).
+        HistoryTypeSpec(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT, 17, HistoryParsers.sleepRespiratoryEvent, loops = false),
         HistoryTypeSpec(HistoryDataType.SPO2_OSA_EVENT_ALT, 18, HistoryParsers.spo2OsaEventAlt),
         HistoryTypeSpec(HistoryDataType.TEMPERATURE_LEGACY, 19, HistoryParsers.legacyTemperature),
+        HistoryTypeSpec(HistoryDataType.SLEEP_PLAN, 20, HistoryParsers.sleepPlan),
+        HistoryTypeSpec(HistoryDataType.DEVICE_STATISTIC, 21, HistoryParsers.deviceStatistic, loops = false),
     ).sortedBy { it.syncOrder }
 
     private val byCode = all.associateBy { it.code }
@@ -63,27 +66,35 @@ object HistoryTypeSpecs {
     private val followers = all.mapNotNull { it.followedBy }.toSet()
 
     /**
-     * Specs to run, gated on the device's advertised type set (from QUERY_VERSION) when known. Types that are
-     * fetched together with another ([HistoryTypeSpec.followedBy]) don't run on their own, and types Zepp never
-     * fetches from the strap ([StrapRelevance.NOT_APPLICABLE]) don't run even when advertised.
-     *
-     * With [features] (0x0028, codemap 01 §3), a type's [HistoryDataType.featureBit] stands in for a missing
-     * advertised list, the way Zepp's job gates use it (04 §2.2): set runs the type, clear skips it. An advertised
-     * list still wins over a clear bit, because the strap's reply has never been captured and a misread bitmap
-     * mustn't stop sleep or HRV sync; [featureDisagreements] lists those cases for the log.
+     * Specs to run, gated as Zepp 10.10.5 gates its jobs (codemap sync-zepp-10.10.5 §3.2, §4): types 75 to 96 by the
+     * version reply's type map ([advertised]), every other type by its [HistoryDataType.featureBit] in [features]
+     * (0x0028). A type with no known bit keeps the old rule until the job list follows Zepp's (parity PR 4): advertised,
+     * or [StrapRelevance.EXPECTED] without a list. A failed version
+     * query gives an empty map, so 75 to 96 don't run. Types fetched together with another
+     * ([HistoryTypeSpec.followedBy]) don't run on their own, and types Zepp never fetches from the strap
+     * ([StrapRelevance.NOT_APPLICABLE]) don't run at all.
      */
     fun plan(advertised: Set<Int>?, features: DeviceFeatures? = null): List<HistoryTypeSpec> =
         all.filter { spec ->
-            val gate = spec.type.featureBit?.let { features?.group2(it) }
-            advertised?.contains(spec.code) ?: when (gate) {
-                null -> spec.type.strap == StrapRelevance.EXPECTED
-                else -> gate
+            if (spec.code in MAP_GATED) {
+                advertised.orEmpty().contains(spec.code)
+            } else {
+                // A clear bit skips the type as Zepp's gate does. Until the job list follows Zepp's (parity PR 4), a set
+                // bit still needs the type advertised, so no START goes out that unstrap didn't send before.
+                val bit = spec.type.featureBit?.let { features?.group2(it) }
+                bit != false && (advertised?.contains(spec.code) ?: (bit == true || spec.type.strap == StrapRelevance.EXPECTED))
             }
         }.filter { it.type !in followers && it.type.strap != StrapRelevance.NOT_APPLICABLE }
 
-    /** Advertised types whose runtime feature bit is clear: Zepp would skip them, we still fetch them. */
+    /** Types Zepp gates on the version reply's map rather than on feature bits (`mmw.z`, `li30`, `bkl`). */
+    private val MAP_GATED = 75..96
+
+    /** Advertised types (below 75) whose feature bit is clear: Zepp, and so unstrap, skips them. */
     fun featureDisagreements(advertised: Set<Int>?, features: DeviceFeatures?): List<Int> =
-        all.filter { spec -> advertised?.contains(spec.code) == true && spec.type.featureBit?.let { features?.group2(it) } == false }
+        all.filter { spec ->
+            spec.code !in MAP_GATED && advertised?.contains(spec.code) == true &&
+                spec.type.featureBit?.let { features?.group2(it) } == false
+        }
             .map { it.code }
 
     /**

@@ -10,22 +10,23 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import org.openstrap.app.ble.GattClient
+import kotlinx.coroutines.withTimeout
+import org.openstrap.app.R
 import org.openstrap.app.data.catching
+import org.openstrap.app.i18n.Strings
 import org.openstrap.app.data.db.HealthDao
 import org.openstrap.app.data.settings.SettingsStore
 import org.openstrap.protocol.ChannelSession
 
 /**
- * History sync: one at a time, a full sync or the types the strap pushed queued behind it, the hourly auto sync, and
- * the work that follows each sync (body signals, workout gap fill, workout effect, daily calories).
+ * History sync, queued and timed as Zepp 10.10.5 does (zepp-alt analysis/codemap/sync-zepp-vs-unstrap.md §1): a
+ * connect with the app in front, a user action, every 12th strap ping in the background, and the strap's pushes. One
+ * queue, one sync at a time, nothing retried on its own. Then the work that follows each sync (body signals, workout
+ * gap fill, workout effect, daily calories).
  */
 // The sync queue and each piece of work after a sync, as small functions.
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LongParameterList")
 internal class SyncCoordinator(
     private val context: Context,
     private val scope: CoroutineScope,
@@ -35,6 +36,11 @@ internal class SyncCoordinator(
     private val firmwareUpdating: StateFlow<Boolean>,
     private val notifiers: Notifiers,
     private val log: (String) -> Unit,
+    /** Whether a phone workout records: Zepp starts no connect or background sync during a phone GPS workout. */
+    private val workoutActive: () -> Boolean,
+    /** After every finished sync: Zepp's doFree writes the clock with its DST hint. */
+    private val afterFinished: suspend (ChannelSession) -> Unit,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     /** Where a sync's findings go: a detected workout, and the morning's body-signal alert. */
     class Notifiers(val autoDetected: AutoDetectNotifier, val healthAlerts: HealthAlertNotifier)
@@ -43,152 +49,138 @@ internal class SyncCoordinator(
     val syncRecord = MutableStateFlow(SyncRecord())
     val syncEnded = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
-    private var lastAutoSync = 0L
+    /** Whether the app is in front: Zepp's connect sync needs it. */
+    @Volatile private var appVisible = false
+
+    private val policy = SyncPolicy()
+
+    /** Zepp's per-device queue: capacity 5, run one task at a time by a single consumer. */
+    private val queue = Channel<SyncTask>(SyncPolicy.QUEUE_CAPACITY, BufferOverflow.DROP_OLDEST)
+
+    @Volatile private var running = false
+
+    /** A sync is running, so a firmware install mustn't start. */
+    val isSyncing: Boolean get() = running
 
     init {
         // Every sync's start and end, pulled or in the background, so Today can tell a stuck sync from a slow one.
         scope.launch {
             var previous: SyncState = SyncState.Idle
             sync.collect { s ->
-                syncRecord.update { it.next(previous, s, nowSeconds()) }
+                syncRecord.update { it.next(previous, s, clock() / MILLIS_PER_SECOND) }
                 previous = s
             }
         }
+        scope.launch { for (task in queue) runTask(task) }
     }
 
     /**
-     * Sync right after connecting (unless one ran recently and didn't fail), then every [AUTO_SYNC_SECONDS] while
-     * connected. A failed auto sync is retried at once: it was most likely cut off by the link this connect replaces.
-     * A failed Sync now isn't a reason: the user asked for that one, and the next auto sync isn't owed anything. A Sync
-     * now kept while there was no session ([held]) runs first.
+     * Connected (DEVICE_CONNECTED): a full sync only with the app in front and more than 120 s since the last
+     * successful sync. A connect in the background doesn't sync.
      */
-    fun autoSync(s: ChannelSession) = scope.launch {
-        while (isActive && link.session === s) {
-            if (held) {
-                held = false
-                requests.trySend(SyncRequest.Full(manual = true, session = s))
-            }
-            val now = nowSeconds()
-            val due = now - lastAutoSync >= MIN_SYNC_GAP_SECONDS || (autoFailed && sync.value is SyncState.Failed)
-            if (due && sync.value !is SyncState.Running && !firmwareUpdating.value) {
-                lastAutoSync = now
-                log("auto sync")
-                requests.trySend(SyncRequest.Full(manual = false, session = s))
-            }
-            delay(AUTO_SYNC_SECONDS * MILLIS_PER_SECOND)
+    fun onConnected() = scope.launch {
+        when {
+            !appVisible -> log("sync: connected in the background, no sync")
+            workoutActive() -> log("sync: connected during a phone workout, no sync")
+            !SyncPolicy.successGapPassed(clock(), lastSuccessMs()) -> log("sync: connected, last sync under 120 s ago")
+            else -> enqueue(SyncTask.Full(SyncTask.Trigger.DEVICE_CONNECTED))
         }
     }
 
-    /** The user's Sync now. Kept, never lost: it waits for a session or a firmware update to end. */
-    fun syncNow() {
-        requests.trySend(SyncRequest.Full(manual = true, session = link.activeSession))
-    }
-
-    /** The strap pushed new data of [types]: sync them now, or after the sync running. */
-    fun syncPushed(types: Set<Int>) {
-        val s = link.activeSession ?: return
-        requests.trySend(SyncRequest.Types(types, s))
+    fun setAppVisible(visible: Boolean) {
+        appVisible = visible
     }
 
     /**
-     * Everything asked for, in order. One worker reads it, so there is one sync at a time and a request made meanwhile
-     * is read when it ends.
+     * A user action (the app comes to the front, pull-to-refresh, the widget, the notification's Sync, Sync now): a
+     * full sync if more than 120 s since the last successful one, as Zepp's USER_ACTION. Else nothing goes to the strap,
+     * as in Zepp, and unlike Zepp nothing shows either: its 1 s of progress looked like a real sync.
      */
-    private val requests = Channel<SyncRequest>(Channel.UNLIMITED)
-
-    /** The worker's turn: a sync holds the lock, so a firmware install mustn't start. */
-    private val syncLock = Mutex()
-
-    /** A Sync now that found no session: it runs at the next connect ([autoSync]). */
-    @Volatile private var held = false
-
-    /** Whether the last sync that ran was an auto sync and failed. */
-    @Volatile private var autoFailed = false
-
-    val isSyncing: Boolean get() = syncLock.isLocked
-
-    init {
+    fun userAction() {
         scope.launch {
-            for (first in requests) {
-                catching { work(listOf(first) + drain()) }.onFailure { log("sync worker: $it") }
+            if (link.activeSession == null) return@launch
+            if (SyncPolicy.successGapPassed(clock(), lastSuccessMs())) {
+                enqueue(SyncTask.Full(SyncTask.Trigger.USER_ACTION))
+            } else {
+                log("sync: last sync under 120 s ago, nothing sent")
             }
         }
     }
 
-    private fun drain(): List<SyncRequest> {
-        val out = mutableListOf<SyncRequest>()
-        while (true) out += requests.tryReceive().getOrNull() ?: break
-        return out
+    /**
+     * A strap ping (WAKE_UP). Every 12th per device queues a background sync after a random 1 to 59 s, if more than
+     * 120 s have passed since the last activity minute synced.
+     */
+    fun onPing(s: ChannelSession) {
+        if (!policy.backgroundSyncDue()) return
+        val wait = SyncPolicy.backgroundDelayMs()
+        log("sync: ping ${policy.wakeUps}, background sync in ${wait / MILLIS_PER_SECOND} s")
+        scope.launch {
+            delay(wait)
+            if (link.activeSession !== s) return@launch
+            val minute = catching { settings.lastSync(ACTIVITY_CURSOR) }.getOrNull()?.times(MILLIS_PER_SECOND)
+            when {
+                workoutActive() -> log("sync: background sync skipped, a phone workout records")
+                !SyncPolicy.successGapPassed(clock(), minute) -> log("sync: background sync skipped, synced under 120 s ago")
+                else -> enqueue(SyncTask.Full(SyncTask.Trigger.LOW_FREQUENCY))
+            }
+        }
     }
 
-    /** Runs one batch of [asked] requests: the syncs they merge into, then the debug dumps. */
-    // Each return is a reason not to sync now.
+    /** The strap pushed `11 <type>`: Zepp queues the types, and after a workout push a full sync too. */
+    fun syncPushed(typeCode: Int, types: Set<Int>) {
+        enqueue(SyncTask.Demand(types))
+        if (typeCode in WORKOUT_PUSHES) enqueue(SyncTask.Full(SyncTask.Trigger.FIRMWARE_NOTIFICATION, forceAll = true))
+    }
+
+    private fun enqueue(task: SyncTask) {
+        if (queue.trySend(task).isFailure) log("sync: queue closed, $task dropped")
+    }
+
+    /** Zepp's `SyncCenterManager.start` checks, the 60 s mock, then the sync itself under a 30 min limit. */
+    // Each return is a reason the task doesn't reach the strap.
     @Suppress("ReturnCount")
-    private suspend fun work(asked: List<SyncRequest>) {
-        var batch = asked
-        if (firmwareUpdating.value) {
-            // The strap is busy installing: keep the user's request, drop what the old firmware pushed.
-            firmwareUpdating.first { !it }
-            batch = batch.filter { it is SyncRequest.Full && it.manual || it is SyncRequest.Dump } + drain()
-        }
+    private suspend fun runTask(task: SyncTask) {
         val s = link.activeSession
         val client = link.gatt
-        val dumps = batch.filterIsInstance<SyncRequest.Dump>()
-        if (s == null || client == null) {
-            if (SyncPlan.of(batch, null).manual) held = true
-            if (dumps.isNotEmpty()) log("dump: not connected")
-            return
+        if (s == null || client == null) return log("sync: $task dropped, not connected")
+        if (firmwareUpdating.value) return log("sync: $task dropped, firmware update running")
+        if (task is SyncTask.Full && !task.forceAll && policy.mock(lastStartMs, clock())) {
+            // Zepp shows 2 s of progress here (its mock sync). unstrap shows nothing, as nothing is synced.
+            return log("sync: $task within 60 s of the last, nothing sent")
         }
-        var leftover = false
-        var ran = false
-        syncLock.withLock {
-            var plan = SyncPlan.of(batch, s)
-            while (!plan.isEmpty) {
-                ran = true
-                HistorySync(s, client, dao, settings, sync, log, notifiers.autoDetected::show).run(plan.only)
-                autoFailed = !plan.manual && sync.value is SyncState.Failed
-                (sync.value as? SyncState.Done)?.let { d ->
-                    catching { settings.setLastSyncDone(d.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
-                }
-                val more = drain()
-                if (link.activeSession !== s || firmwareUpdating.value) {
-                    // The session ended or an install began: a kept Sync now goes round again, the rest is stale.
-                    leftover = SyncPlan.of(more, null).manual
-                    break
-                }
-                plan = SyncPlan.of(more, s)
-            }
-            for (d in dumps) dump(s, client, d)
-            if (ran) {
-                afterSync()
-                // Everything a widget shows may have moved (widgets spec 7): they watch for this.
-                syncEnded.tryEmit(Unit)
-            }
-        }
-        if (ran) retryCutOff(s)
-        if (leftover) requests.trySend(SyncRequest.Full(manual = true, session = null))
-    }
-
-    /**
-     * A sync cut off by a lost link can end only after the reconnect, which skipped its own sync while this one still
-     * showed as running. Run it again on the new link.
-     */
-    private fun retryCutOff(old: ChannelSession) {
-        val current = link.activeSession ?: return
-        if (current === old || sync.value !is SyncState.Failed) return
-        log("sync cut off by the old link, syncing again")
-        requests.trySend(SyncRequest.Full(manual = false, session = current))
-    }
-
-    /** One debug dump, which writes Running and must not leave it behind. */
-    private suspend fun dump(s: ChannelSession, client: GattClient, d: SyncRequest.Dump) {
+        if (task !is SyncTask.Demand) lastStartMs = clock()
+        log("sync: $task")
+        running = true
         try {
-            val since = nowSeconds() - d.days * SECONDS_PER_DAY
-            HistorySync(s, client, dao, settings, sync, log).dumpRaw(since, java.io.File(context.filesDir, "raw"), d.types)
+            val only = (task as? SyncTask.Demand)?.types
+            catching {
+                withTimeout(SyncPolicy.WHOLE_SYNC_MS) {
+                    HistorySync(s, client, dao, settings, sync, log, notifiers.autoDetected::show).run(only)
+                }
+            }.onFailure { log("sync: $it") }
+            if (sync.value is SyncState.Running) sync.value = SyncState.Failed(Strings.app.get(R.string.system_sync_stopped))
+            (sync.value as? SyncState.Done)?.let { d ->
+                lastSuccessMs = d.atEpochSeconds * MILLIS_PER_SECOND
+                catching { settings.setLastSyncDone(d.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
+            }
+            afterSync()
+            if (link.activeSession === s) catching { afterFinished(s) }.onFailure { log("after sync: $it") }
+            // Everything a widget shows may have moved (widgets spec 7): they watch for this.
+            syncEnded.tryEmit(Unit)
         } finally {
-            if (sync.value is SyncState.Running) sync.value = SyncState.Idle
+            running = false
         }
     }
+
+    /** When the last full sync started, of any kind but a push's (Zepp's lastSyncTimeMap). */
+    @Volatile private var lastStartMs: Long? = null
+
+    /** When a sync last succeeded, kept across restarts in [SettingsStore.setLastSyncDone]. */
+    @Volatile private var lastSuccessMs: Long? = null
+
+    private suspend fun lastSuccessMs(): Long? =
+        lastSuccessMs ?: catching { settings.strapSnapshot.first().lastSyncDone?.times(MILLIS_PER_SECOND) }.getOrNull()
 
     private suspend fun afterSync() {
         catching { notifyBodySignals() }.onFailure { log("body signals: $it") }
@@ -243,16 +235,23 @@ internal class SyncCoordinator(
         if (written > 0) log("daily energy: $written days")
     }
 
-    /** Debug aid, see [HistorySync.dumpRaw]. It takes its turn like any sync. */
+    /** Debug aid, see [HistorySync.dumpRaw]. */
     fun dumpRaw(days: Int, types: Set<Int>? = null) {
-        requests.trySend(SyncRequest.Dump(days, types))
+        val s = link.activeSession ?: return log("dump: not connected")
+        val client = link.gatt ?: return
+        scope.launch {
+            val since = nowSeconds() - days * SECONDS_PER_DAY
+            HistorySync(s, client, dao, settings, sync, log).dumpRaw(since, java.io.File(context.filesDir, "raw"), types)
+        }
     }
 
-    private fun nowSeconds() = System.currentTimeMillis() / MILLIS_PER_SECOND
+    private fun nowSeconds() = clock() / MILLIS_PER_SECOND
 
     private companion object {
-        const val MIN_SYNC_GAP_SECONDS = 15 * 60L
-        const val AUTO_SYNC_SECONDS = 60 * 60L
+        /** Pushes after which Zepp queues a full sync too (`rqi` case 1). */
+        val WORKOUT_PUSHES = setOf(5, 6)
+        /** The activity cursor, Zepp's device lastSyncTime for the background sync. */
+        const val ACTIVITY_CURSOR = "gdsp_1"
         const val MILLIS_PER_SECOND = 1_000L
         const val SECONDS_PER_DAY = 86_400L
         /**
@@ -270,47 +269,59 @@ internal class SyncCoordinator(
     }
 }
 
-/**
- * What was asked of the sync worker. [session] is the one it was asked on (null for a Sync now that found none): a
- * request for another session than the current one is stale, except a user's Sync now.
- */
-internal sealed interface SyncRequest {
-    /** Everything. [manual] for the user's Sync now, false for the hourly one. */
-    data class Full(val manual: Boolean, val session: Any?) : SyncRequest
+/** A queued sync: a full one, or the types a push named (Zepp's DemandGDSPStrategy). */
+internal sealed interface SyncTask {
+    enum class Trigger { DEVICE_CONNECTED, USER_ACTION, LOW_FREQUENCY, FIRMWARE_NOTIFICATION }
 
-    /** The types the strap pushed. */
-    data class Types(val types: Set<Int>, val session: Any?) : SyncRequest
+    /** [forceAll]: Zepp's `gvn` after a workout push, which skips the 60 s mock. */
+    data class Full(val trigger: Trigger, val forceAll: Boolean = false) : SyncTask
 
-    /** Debug: [HistorySync.dumpRaw]. */
-    data class Dump(val days: Int, val types: Set<Int>?) : SyncRequest
+    data class Demand(val types: Set<Int>) : SyncTask
 }
 
-/** A batch of [SyncRequest]s merged into one sync: everything, or just the pushed types. */
-internal class SyncPlan(val full: Boolean, val types: Set<Int>, val manual: Boolean) {
-    val isEmpty: Boolean get() = !full && types.isEmpty()
+/**
+ * Zepp 10.10.5's sync timing, copied with its quirks (zepp-alt analysis/codemap/sync-zepp-10.10.5.md §1). Holds the
+ * process-wide counters; one strap, so one device.
+ */
+internal class SyncPolicy {
+    /** Strap pings since the app started (`rcd0.c`, per device). */
+    var wakeUps = 0
+        private set
 
-    /** What [HistorySync.run] takes: null for everything (a full sync covers anything pushed), else the types. */
-    val only: Set<Int>? get() = if (full) null else types
+    /** Calls of the 60 s mock check with a previous start (`bxt.c`, never reset). */
+    private var mockChecks = 0
+
+    /** Counts a ping. True on every [PINGS_PER_SYNC]th, Zepp's LOW_FREQUENCY sync. */
+    @Synchronized
+    fun backgroundSyncDue(): Boolean = ++wakeUps % PINGS_PER_SYNC == 0
+
+    /**
+     * Zepp's `bxt.a`: a full sync that starts no more than 60 s after the last one started becomes a progress run with
+     * nothing sent. Every check with a previous start counts, and each 3rd count runs for real.
+     */
+    @Synchronized
+    fun mock(lastStartMs: Long?, nowMs: Long): Boolean {
+        if (lastStartMs == null || lastStartMs == 0L) return false
+        val i = mockChecks++
+        val forced = i != 0 && i % MOCK_FORCE_EVERY == 0
+        return !forced && lastStartMs < nowMs && lastStartMs + MOCK_WINDOW_MS >= nowMs
+    }
 
     companion object {
-        /**
-         * The plan for [requests] on the [current] session. A request made on another session is dropped, so it can't
-         * replay as a surprise sync; a user's Sync now stays whatever session it was made on. With no current session
-         * only that is left, which is what a caller keeps to run later.
-         */
-        fun of(requests: List<SyncRequest>, current: Any?): SyncPlan {
-            val live = requests.filter {
-                when (it) {
-                    is SyncRequest.Full -> it.manual || (current != null && it.session === current)
-                    is SyncRequest.Types -> current != null && it.session === current
-                    is SyncRequest.Dump -> false
-                }
-            }
-            return SyncPlan(
-                full = live.any { it is SyncRequest.Full },
-                types = live.filterIsInstance<SyncRequest.Types>().flatMapTo(mutableSetOf()) { it.types },
-                manual = live.any { it is SyncRequest.Full && it.manual },
-            )
-        }
+        const val PINGS_PER_SYNC = 12
+        const val MOCK_FORCE_EVERY = 3
+        const val MOCK_WINDOW_MS = 60_000L
+        const val SUCCESS_GAP_MS = 120_000L
+        const val QUEUE_CAPACITY = 5
+        const val WHOLE_SYNC_MS = 30 * 60_000L
+        private const val BACKGROUND_DELAY_MIN_MS = 1_000L
+        private const val BACKGROUND_DELAY_MAX_MS = 59_000L
+
+        /** Zepp's `n3d.f`: more than 120 s since [lastMs], or nothing yet. */
+        fun successGapPassed(nowMs: Long, lastMs: Long?): Boolean = lastMs == null || nowMs - lastMs > SUCCESS_GAP_MS
+
+        /** Zepp's `gjo(1000, 59000)`. */
+        fun backgroundDelayMs(random: kotlin.random.Random = kotlin.random.Random): Long =
+            random.nextLong(BACKGROUND_DELAY_MIN_MS, BACKGROUND_DELAY_MAX_MS + 1)
     }
 }

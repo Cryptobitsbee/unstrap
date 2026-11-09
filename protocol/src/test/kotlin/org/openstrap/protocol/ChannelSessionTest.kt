@@ -70,10 +70,15 @@ private class SimulatedStrap(private val authKey: ByteArray) : StrapLink {
     }
 
     private val outbox = mutableListOf<Pair<Int, ByteArray>>()
+    var authInfoAsked = false
     private fun respond(endpoint: Int, payload: ByteArray) {
         when (endpoint) {
             Endpoints.SERVICES -> outbox += endpoint to "04 0400 0000 00 8200 00 2900 01 1500 00".hexToBytes()
             Endpoints.AUTH -> when (payload[0].toInt()) {
+                0 -> {
+                    authInfoAsked = true
+                    outbox += endpoint to "10 00 01 01 0100 01".hexToBytes()
+                }
                 4 -> {
                     val shared = B163.sharedSecret(keys.privateKey, payload.copyOfRange(4, 52))
                     pendingCipher = ChannelCipher(shared, authKey)
@@ -133,6 +138,8 @@ class ChannelSessionTest {
         session.start(backgroundScope)
         session.handshake(key)
         assertTrue(session.isAuthenticated)
+        // Auth info `00` goes first, as Zepp sends it on every connect.
+        assertTrue(strap.authInfoAsked)
         assertTrue(session.services.requiresEncryption(Endpoints.BATTERY))
 
         val reply = session.request(Endpoints.BATTERY, BatteryInfo.GET) { it[0].toInt() == 4 }

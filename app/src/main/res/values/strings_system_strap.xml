@@ -84,6 +84,7 @@
     <string name="system_sync_kind_skin_temperature">skin temperature</string>
     <string name="system_sync_kind_workouts">workouts</string>
     <!-- Any other kind of data the strap keeps. -->
+    <string name="system_sync_kind_strap_stats">strap statistics</string>
     <string name="system_sync_kind_other">other data</string>
     <!-- A developer's dump of one kind of data, by its number. Debug only, not translated. -->
     <string name="system_sync_dumping" translatable="false">Dumping type <xliff:g id="code" example="18">%1$d</xliff:g></string>

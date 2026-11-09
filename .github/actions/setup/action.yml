@@ -1,0 +1,25 @@
+# What every job needs before Gradle: Java, Gradle's cache, the Android SDK packages and Robolectric's jar.
+name: Set up the build
+description: Java 21, Gradle, the Android SDK packages and the Robolectric cache
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: 21
+
+    - uses: gradle/actions/setup-gradle@v5
+
+    # bash -e {0}, as a workflow's own run steps: `shell: bash` adds pipefail, and `yes` ends on a closed pipe.
+    - name: Install Android SDK packages
+      shell: bash -e {0}
+      run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" > /dev/null
+
+    # Robolectric downloads its Android jar (about 200 MB) from Maven Central into ~/.m2 while the tests run, outside
+    # the Gradle cache. Fetched on every run, it gets rate limited (HTTP 429) and every Robolectric test fails.
+    - uses: actions/cache@v6
+      with:
+        path: ~/.m2/repository/org/robolectric
+        key: robolectric-${{ hashFiles('gradle/libs.versions.toml', 'app/src/test/resources/robolectric.properties') }}

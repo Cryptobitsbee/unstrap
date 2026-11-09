@@ -18,6 +18,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -82,6 +83,7 @@ class FirmwareViewModelTest {
         assertEquals(connection.value, vm.connection.value)
     }
 
+    @Ignore("Firmware updates are off (FirmwareViewModel.UPDATES_ENABLED), so install refuses. Runs again once they're back.")
     @Test fun `events that don't fit the step are ignored, and late progress can't revive an install`() = runBlocking {
         connection.value = ConnectionState.Connected(50, "3.25")
         val vm = vm { ByteArrayInputStream(ByteArray(10)) }

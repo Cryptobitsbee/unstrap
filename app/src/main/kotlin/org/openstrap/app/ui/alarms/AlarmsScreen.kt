@@ -44,6 +44,7 @@ import org.openstrap.app.ui.glow.PageSheet
 import org.openstrap.app.ui.glow.PageTextButton
 import org.openstrap.app.ui.glow.PageHeader
 import org.openstrap.app.ui.glow.PageMenuRow
+import org.openstrap.app.ui.glow.PageSwitchRow
 import org.openstrap.app.ui.glow.PageNote
 import org.openstrap.app.ui.glow.PagePanel
 import org.openstrap.app.ui.dashboard.ScreenList
@@ -111,7 +112,7 @@ fun healthAlertsSummary(state: AlarmsUiState, strings: Strings = Strings.app): S
     fun on(key: Int) = g[key]?.number?.toInt()?.takeIf { it != 0 }
     val high = on(SettingsCodec.KEY_HIGH_HR_ALERT)
     val low = on(SettingsCodec.KEY_LOW_HR_ALERT)
-    val oxygen = on(SettingsCodec.KEY_LOW_SPO2_ALERT)
+    val oxygen = on(SettingsCodec.KEY_LOW_SPO2_ALERT)?.takeIf { state.oxygenAlertAvailable }
     val heart = high != null || low != null
     return when {
         heart && oxygen != null -> strings.get(R.string.you_health_summary_both)
@@ -285,11 +286,19 @@ private fun HeartAlertsPanel(state: AlarmsUiState, vm: AlarmsViewModel) {
                     { vm.setEnum(SettingsCodec.KEY_LOW_HR_ALERT, it) }, divider = divider(), enabled = !state.busy && alerts, quiet = off,
                 )
             }
+            g[SettingsCodec.KEY_SMART_SPO2]?.bool?.let { on ->
+                PageSwitchRow(
+                    stringResource(R.string.you_health_auto_oxygen), stringResource(R.string.you_health_auto_oxygen_note), on,
+                    { vm.setAutoOxygen(it) }, divider = divider(), enabled = !state.busy,
+                )
+            }
             g[SettingsCodec.KEY_LOW_SPO2_ALERT]?.let { s ->
+                val oxygen = state.oxygenAlertAvailable
                 PageMenuRow(
                     stringResource(R.string.you_health_oxygen), s.choices.orEmpty(), s.number?.toInt(),
                     { alertLabel(it, R.string.you_health_below_percent) },
-                    { vm.setEnum(SettingsCodec.KEY_LOW_SPO2_ALERT, it) }, divider = divider(), enabled = !state.busy, quiet = off,
+                    { vm.setEnum(SettingsCodec.KEY_LOW_SPO2_ALERT, it) }, divider = divider(), enabled = !state.busy && oxygen, quiet = off,
+                    note = if (oxygen) null else stringResource(R.string.you_health_oxygen_note),
                 )
             }
         }

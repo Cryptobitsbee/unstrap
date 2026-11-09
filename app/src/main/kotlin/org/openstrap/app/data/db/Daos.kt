@@ -416,6 +416,10 @@ interface HealthDao : RangedReads {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertHeartRateIfMissing(samples: List<HeartRateSample>)
 
+    /** The first stored minute at or after [from], standing in for when the strap was paired. */
+    @Query("SELECT MIN(timestamp) FROM activity_minute WHERE timestamp >= :from")
+    suspend fun firstActivityAfter(from: Long): Long?
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertActivityIfMissing(minutes: List<ActivityMinute>)
 

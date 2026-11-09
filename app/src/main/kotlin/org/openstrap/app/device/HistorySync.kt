@@ -50,10 +50,10 @@ import org.openstrap.protocol.history.SleepRespiratoryEvent
 import org.openstrap.protocol.history.SleepSpO2Sample
 import org.openstrap.protocol.history.SpO2OsaEvent
 import org.openstrap.protocol.history.TodayActivityExtended
-import org.openstrap.protocol.history.FastRechargeModeException
 import org.openstrap.protocol.history.FetchCodec
 import org.openstrap.protocol.history.GdspClient
 import org.openstrap.protocol.history.GdspFetch
+import org.openstrap.protocol.history.PreviousChunk
 import org.openstrap.protocol.history.GdspMessage
 import org.openstrap.protocol.history.GdspStatus
 import org.openstrap.protocol.history.WorkoutFetch
@@ -81,6 +81,7 @@ import org.openstrap.protocol.history.SpO2Reading
 import org.openstrap.protocol.history.SpotHeartRate
 import org.openstrap.protocol.services.Endpoints
 import org.openstrap.protocol.services.ReadinessCodec
+import org.openstrap.protocol.services.PaiCodec
 import org.openstrap.protocol.u8
 import org.openstrap.protocol.toHex
 import java.time.Instant
@@ -120,6 +121,7 @@ class HistorySync internal constructor(
     private val control = Channel<GdspMessage>(Channel.UNLIMITED)
     private val data = Channel<ByteArray>(Channel.UNLIMITED)
     private val client = GdspClient(::send, control, data, log)
+    private val channelJobs = ZeppChannelJobs(session, dao, cursors, zone, log) { dao.inTransaction { store(it) } }
 
     /** Syncs every type, or only the codes in [only] (an on-demand sync after a data-available push). */
     suspend fun run(only: Set<Int>? = null) = coroutineScope {
@@ -135,11 +137,7 @@ class HistorySync internal constructor(
         // catching gives back a CancellationException only once the sync is cancelled: a timeout is one too, and fails it.
         try {
             catching { sync(only) }.onFailure { e ->
-                if (e is FastRechargeModeException) {
-                    // Zepp ends the sync job at once in this mode (xyk.java:66-70), and the data waits on the strap.
-                    log("history: strap is in fast-charge mode, sync stopped ($e)")
-                    state.value = SyncState.Failed(Strings.app.get(R.string.system_sync_fast_charge))
-                } else {
+                run {
                     log("history failed: $e")
                     // A wrapped system error's message is just its class name (android.os.DeadObjectException), not for
                     // the card. Whatever a call on a dropped link threw (a missing characteristic, a closed op), the cause
@@ -161,29 +159,49 @@ class HistorySync internal constructor(
     private suspend fun sync(only: Set<Int>?) {
         // Inside [run]'s catch: a database error here ends the sync as Failed instead of escaping the app's scope.
         repairEarlierSyncs()
+        migrateCursorsOnce()
         gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_DATA)
         if (!useChannel) gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_CONTROL)
         log("history: control via ${if (useChannel) "channel 0x004B" else "HUAMI(0004)"}")
 
-        val version = client.queryVersion()
+        // Zepp's loader and job gates, before the first job: the sleep module once per strap, then the PAI module's,
+        // the GDSP and the readiness module's versions once per connection.
+        val sleepPlan = channelJobs.sleepPlanSupported()
+        val paiVersion = channelJobs.paiVersion()
+        val version = versionFor(session)
         val advertised = version?.supportedTypes()
+        val readinessVersion = channelJobs.readinessVersion()
         log("history version ${version?.version}, strap offers types ${advertised?.sorted()}" + only?.let { ", syncing $it" }.orEmpty())
 
-        HistoryTypeSpecs.featureDisagreements(advertised, session.features).takeIf { it.isNotEmpty() }
-            ?.let { log("history: feature bits clear for advertised types $it; fetching them anyway") }
-        val plan = HistoryTypeSpecs.plan(advertised, session.features).filter { it.parser != null && (only == null || it.code in only) }
-        plan.forEachIndexed { i, spec ->
-            val step = Strings.app.format(R.string.system_sync_step, syncKindName(spec.type), i + 1, plan.size)
-            state.value = SyncState.Running(step, i.toFloat() / plan.size)
-            catching { if (spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(spec) else syncType(spec) }.onFailure { e ->
+        val gates = ZeppJobs.Gates(
+            advertised, session.features, session.services::has, readinessVersion, paiVersion, sleepPlan, statisticsDue(),
+        )
+        val all = ZeppJobs.list(gates)
+        val jobs = if (only == null) all else ZeppJobs.only(all, only)
+        log("history jobs: ${jobs.joinToString { jobLabel(it) }}")
+        // Zepp runs every job and counts the ones that failed; the sync then ends with an error.
+        var failedTypes = 0
+        jobs.forEachIndexed { i, job ->
+            val step = Strings.app.format(R.string.system_sync_step, jobName(job), i + 1, jobs.size)
+            state.value = SyncState.Running(step, i.toFloat() / jobs.size)
+            val ok = catching {
+                when (job) {
+                    is ZeppJob.Gdsp ->
+                        if (job.spec.followedBy == HistoryDataType.SPORT_DETAIL) syncWorkouts(job.spec) else syncType(job.spec)
+                    is ZeppJob.Readiness -> channelJobs.readiness(job.op)
+                    ZeppJob.Pai -> channelJobs.pai()
+                }
+            }.getOrElse { e ->
                 // A timeout is a CancellationException too, but catching gives back only a cancelled sync's (audit C2).
-                if (e is FastRechargeModeException) throw e
                 // The link is gone: every later type would fail the same way, and the sync must not end as Done.
                 if (!gatt.connected.value) throw e
-                log("history ${spec.type}: $e")
+                log("history ${jobLabel(job)}: $e")
+                false
             }
+            // Zepp ignores the breath events' result (`stk`).
+            val ignored = job is ZeppJob.Gdsp && job.spec.type == HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT
+            if (!ok && !ignored) failedTypes++
         }
-        if (only == null && session.services.has(Endpoints.READINESS)) catching { syncReadiness() }.onFailure { log("readiness: $it") }
         // A session the strap ran alongside a phone workout has just come in: its figures replace the model's.
         catching {
             org.openstrap.app.data.WorkoutEffectEngine(dao)
@@ -194,8 +212,29 @@ class HistorySync internal constructor(
         catching { org.openstrap.app.data.SleepSource(dao).purgeExpired(System.currentTimeMillis() / 1000) }
             .onSuccess { if (it > 0) log("history: removed $it sleep sessions deleted over a week ago") }
             .onFailure { log("deleted sleep: $it") }
-        state.value = SyncState.Done(System.currentTimeMillis() / 1000)
+        state.value = when {
+            fastRecharge -> SyncState.Failed(Strings.app.get(R.string.system_sync_fast_charge))
+            failedTypes > 0 -> {
+                log("history: $failedTypes types failed")
+                SyncState.Failed(Strings.app.get(R.string.system_sync_failed))
+            }
+            else -> SyncState.Done(System.currentTimeMillis() / 1000)
+        }
     }
+
+    /**
+     * The GDSP version reply, asked once per connection as Zepp does (`vwi.b`): kept only when it succeeded, so a
+     * failed query is asked again at the next sync.
+     */
+    private suspend fun versionFor(s: ChannelSession): GdspMessage.VersionReply? {
+        synchronized(versions) { versions[s] }?.let { return it }
+        val reply = client.queryVersion()?.takeIf { it.isSuccess }
+        if (reply != null) synchronized(versions) { versions[s] = reply }
+        return reply
+    }
+
+    /** The strap answered a START with fast-recharge mode: Zepp then starts no job until it ends (cached state). */
+    private var fastRecharge = false
 
     /**
      * Debug aid: fetches every type the strap offers since [fromEpoch] and writes each chunk's payload to
@@ -212,7 +251,7 @@ class HistorySync internal constructor(
         try {
             gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_DATA)
             if (!useChannel) gatt.enableNotifications(StrapUuids.MAIN_SERVICE, HISTORY_CONTROL)
-            val version = client.queryVersion()
+            val version = versionFor(session)
             val codes = only?.sorted() ?: version?.supportedTypes()?.sorted().orEmpty()
             log("dump: types $codes (strap offers ${version?.supportedTypes()?.sorted()})")
             for (code in codes) {
@@ -222,11 +261,9 @@ class HistorySync internal constructor(
                     repeat(DUMP_CHUNKS) {
                         val chunk = when (val f = client.fetch(code, cursor, zone)) {
                             is GdspFetch.Chunk -> f
-                            is GdspFetch.Refused -> { log("dump $code: start ${f.status}"); return@catching }
                             is GdspFetch.Failed -> { log("dump $code: ${f.reason}"); return@catching }
                             GdspFetch.Empty -> { log("dump $code: empty"); return@catching }
                         }
-                        client.finish()
                         val header = chunk.headerTime
                         val payload = chunk.payload
                         java.io.File(dir, "${code}_$header.bin").writeBytes(payload)
@@ -253,7 +290,8 @@ class HistorySync internal constructor(
 
     /**
      * Undo damage from earlier builds: 0xFF padding stored as 255-step minutes, minutes dated before any strap clock
-     * was set, sync cursors past the present, and sport effects left with no workout to own them.
+     * was set, and sport effects left with no workout to own them. Cursors are left alone: Zepp corrects them as
+     * they are read ([ZeppCursors.onRead]).
      *
      * Activity dated after now is kept. The stale slots dated weeks ahead that builds before 16 Oct stored are gone,
      * and [keepable] keeps new ones out, so a minute after now means the phone's clock went back, and deleting it
@@ -272,26 +310,20 @@ class HistorySync internal constructor(
         dao.deleteNapStagesInsideMainSleep()
         val naps = dao.deleteNapsInsideMainSleep()
         if (naps > 0) log("history: removed $naps naps inside a main sleep")
-        // Builds before workouts were decoded moved the workout cursors past workouts they threw away. None left because
-        // they were all deleted here is not that, and going back would only fetch them again to skip them.
-        if (dao.workoutCount() == 0 && dao.deletedWorkoutsAll().isEmpty()) for (type in WORKOUT_TYPES) {
-            val key = "gdsp_${type.code}"
-            if ((cursors.get(key) ?: continue) > now - WORKOUT_LOOKBACK) cursors.set(key, now - WORKOUT_LOOKBACK)
-        }
-        for (type in HistoryDataType.entries) {
-            val key = "gdsp_${type.code}"
-            val cursor = cursors.get(key) ?: continue
-            val activityRepaired = type == HistoryDataType.ACTIVITY && padding + outside > 0
-            if (cursor <= now + FUTURE_SLACK && !activityRepaired) continue
-            val reset = if (type == HistoryDataType.ACTIVITY) {
-                dao.latestActivity(now)?.plus(60) ?: (now - DEFAULT_LOOKBACK)
-            } else {
-                now - DEFAULT_LOOKBACK
-            }
-            log("history: cursor for $type was ${Instant.ofEpochSecond(cursor)}, reset to ${Instant.ofEpochSecond(reset)}")
-            cursors.set(key, reset)
-        }
         removeUnownedEffects(now)
+    }
+
+    /**
+     * Once, the cursors stored by builds before Zepp's rules move to them: second HR v2 (87) now reads and writes
+     * 76's cursor, and workout detail (6) is written with the summary's (5).
+     */
+    private suspend fun migrateCursorsOnce() {
+        if (cursors.get(CURSORS_ZEPP_KEY) != null) return
+        listOfNotNull(cursors.get(keyOf(HistoryDataType.SEC_HR)), cursors.get(keyOf(HistoryDataType.SEC_HR_V2))).maxOrNull()
+            ?.let { cursors.set(keyOf(HistoryDataType.SEC_HR), it) }
+        cursors.get(keyOf(HistoryDataType.SPORT_SUMMARY))?.let { cursors.set(keyOf(HistoryDataType.SPORT_DETAIL), it) }
+        cursors.set(CURSORS_ZEPP_KEY, System.currentTimeMillis() / 1000)
+        log("history: cursors moved to Zepp's rules")
     }
 
     /** Effects stored before a sync left them out ([unownedEffects]) go, remembered as a sync would. */
@@ -327,22 +359,23 @@ class HistorySync internal constructor(
         return strap + dao.appWorkoutsOnce(from, end).map { Workouts.phoneRange(it, now) }
     }
 
-    /**
-     * Where a type with no cursor starts. Forget strap clears every cursor, and the strap may hold days the phone never
-     * fetched, so the sync takes what it holds after the type's newest stored row (fetched again, which replaces it),
-     * or, with none, as far back as the strap keeps history ([HISTORY_LOOKBACK]). Workouts keep their own lookback.
-     */
-    private suspend fun firstCursor(type: HistoryDataType, now: Long): Long {
-        if (type in WORKOUT_TYPES) return now - WORKOUT_LOOKBACK
-        val oldest = now - HISTORY_LOOKBACK
-        val newest = NEWEST_KEY[type]?.let { key ->
-            dao.newestKeyOnce(androidx.sqlite.db.SimpleSQLiteQuery(key.sql))
-                // A day key is a date: its local midnight here is where that day's records start.
-                ?.let { if (key.day) Days.start(DayKey.date(it), zone) else it }
-                ?.minus(key.before)
+    /** A type's stored cursor as Zepp reads it: corrected, or its default when there is none ([ZeppCursors]). */
+    private suspend fun read(type: HistoryDataType, now: Long): Long = ZeppCursors.read(cursors, keyOf(type), now, zone)
+
+    private suspend fun startOf(type: HistoryDataType, now: Long): Long = when {
+        // Statistics ask from now. A sleep plan with none stored falls back to the bind time, as Zepp's job does
+        // with no cursor: the first minute stored stands in for it.
+        type == HistoryDataType.DEVICE_STATISTIC -> now
+        type == HistoryDataType.SLEEP_PLAN && cursors.get(keyOf(type)) == null -> dao.firstActivityAfter(MIN_VALID_EPOCH) ?: now
+        else -> {
+            val stored = HashMap<HistoryDataType, Long>()
+            for (t in ZEPP_READS[type] ?: listOf(type)) stored[t] = read(t, now)
+            ZeppCursors.start(type, now, zone) { stored.getValue(it) }
         }
-        return newest?.coerceIn(oldest, now) ?: oldest
     }
+
+    private suspend fun save(type: HistoryDataType, value: Long, now: Long) =
+        cursors.set(keyOf(ZeppCursors.keyType(type)), ZeppCursors.onWrite(value, now))
 
     /**
      * Whether the strap workout [row] is the strap's copy ([Workouts.sameWorkout]) of a time marked as no workout: a
@@ -351,137 +384,172 @@ class HistorySync internal constructor(
     private suspend fun discardedPhoneWorkout(row: Workout): Boolean =
         dao.dismissedWorkoutsAll().any { Workouts.sameWorkout(row.start..row.end, it.start..it.end) }
 
-    private suspend fun syncType(spec: HistoryTypeSpec) {
-        val key = "gdsp_${spec.code}"
-        var cursor = cursors.get(key) ?: firstCursor(spec.type, System.currentTimeMillis() / 1000)
-        // The strap keeps updating a day's max exercise HR, so Zepp re-fetches it from the start of the day on every
-        // sync (y4t.java:62-69).
-        if (spec.type == HistoryDataType.DAILY_MAX_EXERCISE_HR) cursor = dayStart(cursor)
-        repeat(MAX_CHUNKS_PER_TYPE) {
-            val chunk = when (val f = client.fetch(spec.code, cursor, zone)) {
+    /**
+     * One type, as Zepp's `l59` loop: chunks from the type's start ([ZeppCursors.start]) while the next cursor moves
+     * on, then the records stored together and the cursor written once ([ZeppCursors.saved]). False when it failed
+     * with nothing fetched, which fails the sync.
+     */
+    // Each break ends the type for a reason of its own.
+    @Suppress("CyclomaticComplexMethod", "LongMethod", "LoopWithTooManyJumpStatements")
+    private suspend fun syncType(spec: HistoryTypeSpec): Boolean {
+        val now = System.currentTimeMillis() / 1000
+        val start = startOf(spec.type, now)
+        var cursor = start
+        // Zepp's `l59.f`: up to 3 failed exchanges per type in a sync (1 for 79 and 96), each repeating the same cursor,
+        // and no cap on chunks while the cursor moves on. The ACK has gone out before anything here is parsed.
+        var retries = if (spec.code in SINGLE_TRY) 1 else RETRIES
+        var previous: PreviousChunk? = null
+        val got = mutableListOf<HistoryRecord>()
+        var next: Long? = null
+        var ok = true
+        loop@ while (true) {
+            check(gatt.connected.value) { Strings.app.get(R.string.system_sync_link_dropped) }
+            if (fastRecharge) { ok = got.isNotEmpty(); break }
+            val chunk = when (val f = client.fetch(spec.code, cursor, zone, previous)) {
                 is GdspFetch.Chunk -> f
-                is GdspFetch.Refused -> { log("history ${spec.type}: start refused (${f.status})"); return }
-                is GdspFetch.Failed -> { log("history ${spec.type}: ${f.reason}"); return }
-                GdspFetch.Empty -> return
+                GdspFetch.Empty -> break@loop
+                is GdspFetch.Failed -> {
+                    log("history ${spec.type}: ${f.reason}")
+                    if (f.fastRecharge) fastRecharge = true
+                    if (f.cyclic || --retries <= 0 || fastRecharge) { ok = got.isNotEmpty(); break@loop }
+                    continue@loop
+                }
             }
             val headerTime = chunk.headerTime
             val payload = chunk.payload
             // The size field counts records, not bytes (activity: size 4 = four 8-byte minutes).
             val unit = chunk.unit ?: run {
-                log("history ${spec.type}: got ${payload.size} bytes for size ${chunk.sizeField}, discarding")
-                finish(GdspStatus.DATA_SIZE_MISMATCH)
-                return
+                log("history ${spec.type}: got ${payload.size} bytes for size ${chunk.sizeField}, not read")
+                break@loop
             }
-            log("history ${spec.type}: ${payload.size} bytes (${chunk.sizeField}×$unit) from ${Instant.ofEpochSecond(headerTime)}: ${payload.copyOf(minOf(32, payload.size)).toHex()}")
-
-            when (val result = spec.parser!!.parse(payload, ParseContext(headerTime, activityRecordSize = recordSize(spec.code, payload, chunk.sizeField)))) {
-                is ParseResult.Failure -> {
-                    log("history ${spec.type}: parse failed: ${result.reason}")
-                    finish(GdspStatus.CONTENT_PARSE_ERROR)
-                    return
-                }
-                is ParseResult.Success -> {
-                    // Drop records with impossible times (stale buffer slots, data from before the clock was set), and
-                    // activity minutes that haven't ended yet.
-                    val now = System.currentTimeMillis() / 1000
-                    val (records, parsedNext) = holdBackPartialMinute(result.records, result.nextCursor, cursor)
-                    val kept = keepable(spec.type, records, now)
-                    val dropped = records.size - kept.size
-                    log(
-                        "history ${spec.type}: ${kept.size} records" +
-                            if (dropped > 0) " ($dropped unfinished or with impossible times dropped)" else "",
-                    )
-                    // The chunk's rows commit together, before the ACK and the cursor: a kill before the commit keeps
-                    // none of them and the cursor where it was, a kill after it fetches the chunk again, and storing
-                    // it again replaces the same rows.
-                    dao.inTransaction { store(kept) }
-                    // Only acknowledge once the data is safely in the database.
-                    finish()
-                    val next = nextCursor(spec.type, headerTime, records, parsedNext, kept, now)
-                    if (next != null && next > cursor) cursors.set(key, next)
-                    if (!HistoryTypeSpecs.shouldContinue(spec, cursor, next)) return
-                    cursor = next!!
-                }
-            }
-        }
-    }
-
-    /**
-     * Per-second HR is stored as one average per minute, keyed by the minute. A minute split across two chunks
-     * would be averaged twice, the second half replacing the first, so the chunk's last minute is left out and the
-     * cursor stops at its start: the next chunk brings the whole minute.
-     */
-    private fun holdBackPartialMinute(records: List<HistoryRecord>, next: Long?, cursor: Long): Pair<List<HistoryRecord>, Long?> {
-        if (records.isEmpty() || records.any { it !is SecondHeartRate }) return records to next
-        val lastMinute = records.maxOf { it.timestamp } / 60 * 60
-        // Never hold back so much that the cursor can't move.
-        if (lastMinute <= cursor) return records to next
-        return records.filter { it.timestamp < lastMinute } to lastMinute
-    }
-
-    /** Saves the strap's latest readiness score; it keeps no history, so this runs every sync. */
-    private suspend fun syncReadiness() {
-        val since = System.currentTimeMillis() / 1000 - DEFAULT_LOOKBACK
-        val reply = session.request(Endpoints.READINESS, ReadinessCodec.scoreRequest(since), 8_000) { it.isNotEmpty() && it.u8(0) == ReadinessCodec.SCORE + 1 }
-        val scores = ReadinessCodec.parseScores(reply).orEmpty()
-        log("readiness: ${scores.joinToString { "${Instant.ofEpochSecond(it.day)} ${it.score}" }.ifEmpty { "none" }}")
-        // The strap's day is its local midnight, taken as its date in the phone's zone, as the strap keeps the phone's.
-        val rows = scores.filter { it.score != null }.map {
-            StrapReadinessRow(
-                DayKey.fromLegacy(it.day, zone), it.updatedAt, it.score, it.hrvScore, it.restingHrScore, it.skinTemperatureScore,
-                it.breathingScore, it.sleepHrv, it.sleepRestingHr, it.algorithmVersion,
+            log(
+                "history ${spec.type}: ${payload.size} bytes (${chunk.sizeField}×$unit) from ${Instant.ofEpochSecond(headerTime)}: " +
+                    payload.copyOf(minOf(32, payload.size)).toHex(),
             )
+            val context = ParseContext(headerTime, activityRecordSize = recordSize(spec.code, payload, chunk.sizeField))
+            val result = spec.parser!!.parse(payload, context)
+            // Zepp parses after the ACK and tells the strap nothing of a parse failure.
+            if (result is ParseResult.Failure) {
+                log("history ${spec.type}: parse failed: ${result.reason}")
+                break@loop
+            }
+            val records = (result as ParseResult.Success).records
+            log("history ${spec.type}: ${records.size} records")
+            got += records
+            val following = ZeppCursors.next(spec.type, headerTime, records, result.nextCursor)
+            if (following != null) next = following
+            if (!HistoryTypeSpecs.shouldContinue(spec, cursor, following)) break@loop
+            previous = PreviousChunk(cursor, headerTime)
+            cursor = following ?: break@loop
         }
-        if (rows.isNotEmpty()) dao.insertStrapReadiness(rows)
+        if (got.isNotEmpty()) dataOut(spec.type, got, next, start)
+        if (spec.type == HistoryDataType.DEVICE_STATISTIC && ok) save(spec.type, now, now)
+        return ok
     }
 
-    private suspend fun finish(status: GdspStatus = GdspStatus.SUCCESS) = client.finish(status)
+    /**
+     * What Zepp's handler does with a type's records once the job ends: stores them, then writes the cursor (recovery
+     * HR writes it first). Records with impossible times are not stored, as before.
+     */
+    private suspend fun dataOut(type: HistoryDataType, received: List<HistoryRecord>, next: Long?, start: Long) {
+        val now = System.currentTimeMillis() / 1000
+        val records = if (type == HistoryDataType.ACTIVITY) ZeppCursors.activityKept(received, now) else received
+        val saved = ZeppCursors.saved(type, records, next)
+        if (saved != null && type == HistoryDataType.RECOVERY_HEART_RATE) save(type, saved, now)
+        val kept = storable(type, records, now)
+        val dropped = records.count { !(it is ActivitySample && it.isBlank) } - kept.size
+        log("history $type: storing ${kept.size} records" + if (dropped > 0) " ($dropped with impossible times dropped)" else "")
+        // The minute the second HR started in was stored partly by the last sync: it stays as it was.
+        val partMinute = if (type == HistoryDataType.SEC_HR || type == HistoryDataType.SEC_HR_V2) start / 60 * 60 else null
+        dao.inTransaction { store(kept, partMinute) }
+        if (saved == null || type == HistoryDataType.RECOVERY_HEART_RATE) return
+        // Zepp writes the sleep result's cursor only when it moved (`upg0`).
+        if (type == HistoryDataType.SLEEP_RESULT && cursors.get(keyOf(type)) == saved) return
+        save(type, saved, now)
+    }
+
+    /** Device statistics (44) run at most once a day. */
+    private suspend fun statisticsDue(): Boolean {
+        val last = cursors.get(keyOf(HistoryDataType.DEVICE_STATISTIC)) ?: return true
+        return Days.start(last, zone) < Days.start(System.currentTimeMillis() / 1000, zone)
+    }
+
+    /** A job as the log names it: the GDSP type, or the channel endpoint and opcode. */
+    private fun jobLabel(job: ZeppJob) = when (job) {
+        is ZeppJob.Gdsp -> job.spec.type.name
+        is ZeppJob.Readiness -> "%04x %02x".format(java.util.Locale.ROOT, Endpoints.READINESS, job.op)
+        ZeppJob.Pai -> "%04x %02x".format(java.util.Locale.ROOT, Endpoints.PAI, PaiCodec.QUERY)
+    }
+
+    private fun jobName(job: ZeppJob) = when (job) {
+        is ZeppJob.Gdsp -> syncKindName(job.spec.type)
+        is ZeppJob.Readiness -> Strings.app.get(R.string.system_sync_kind_other)
+        ZeppJob.Pai -> syncKindName(HistoryDataType.PAI)
+    }
 
     /**
-     * Workouts, one per round: the summary, then its detail from the same cursor (04 §3.16). The cursor only
-     * moves once both are stored, so a workout whose detail transfer broke is fetched again next time.
+     * Workouts as Zepp's `pxk`: the summary, then its detail from the same cursor (04 §3.16), the next pair from the
+     * summary's header + 1 s. The pairs are stored when the loop ends, then the cursor goes to the last workout + 1 s
+     * (at most now) for both 5 and 6. A failed detail fails the job and stores nothing, so the cursor stays.
      */
-    private suspend fun syncWorkouts(spec: HistoryTypeSpec) {
-        val key = "gdsp_${spec.code}"
-        var cursor = cursors.get(key) ?: (System.currentTimeMillis() / 1000 - WORKOUT_LOOKBACK)
-        repeat(MAX_CHUNKS_PER_TYPE) {
+    // Each return or break ends the loop for a reason of its own.
+    @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
+    private suspend fun syncWorkouts(spec: HistoryTypeSpec): Boolean {
+        var cursor = startOf(spec.type, System.currentTimeMillis() / 1000)
+        val pairs = mutableListOf<WorkoutFetch.Workout>()
+        while (true) {
+            if (fastRecharge) return false
             when (val w = client.fetchWorkout(cursor, zone)) {
-                WorkoutFetch.None -> return
-                is WorkoutFetch.Failed -> { log("history workout: ${w.reason}"); return }
+                WorkoutFetch.None -> break
+                is WorkoutFetch.Failed -> {
+                    log("history workout: ${w.reason}")
+                    if (w.fastRecharge) fastRecharge = true
+                    return false
+                }
                 is WorkoutFetch.Workout -> {
-                    val now = System.currentTimeMillis() / 1000
-                    val deleted = dao.deletedWorkoutsAll().any { it.start == w.summary.trackId }
-                    val discarded = !deleted && discardedPhoneWorkout(workoutRow(w.summary))
-                    if (deleted) {
-                        log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: deleted in OpenStrap, skipped")
-                    } else if (discarded) {
-                        // The strap's copy of a phone workout discarded before it synced: deleted like one deleted here.
-                        log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: over a discarded workout, skipped")
-                        dao.insertDeletedWorkouts(listOf(DeletedWorkout(w.summary.trackId, null, now)))
-                    } else if (w.summary.timestamp in MIN_VALID_EPOCH..now + FUTURE_SLACK) {
-                        log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: type ${w.summary.sportType}, subtype ${w.summary.subtype}, ${w.detail?.heartRate?.size ?: 0} HR samples")
-                        val storedBefore = dao.workout(w.summary.trackId).first() != null
-                        dao.inTransaction { store(listOfNotNull(w.summary, w.detail)) }
-                        val row = workoutRow(w.summary)
-                        // One you started on the phone over the same time is the same workout: nothing new to tell.
-                        val yours = Workouts.phoneTwin(row, dao.appWorkoutsOnce(row.start, row.end), now) != null
-                        if (!yours && Workouts.notifyAutoDetected(row, storedBefore, now)) {
-                            catching { onAutoDetected(row) }.onFailure { log("auto-detect notification: $it") }
-                        }
-                    } else {
-                        log("history workout with impossible time ${w.summary.timestamp} dropped")
-                    }
-                    if (w.retryDetail) { log("history workout: detail failed, will retry next sync"); return }
-                    val next = w.nextCursor.coerceAtMost(now)
-                    if (next <= cursor) return
-                    cursors.set(key, next)
-                    cursor = next
+                    if (w.retryDetail) { log("history workout: detail failed, nothing stored"); return false }
+                    pairs += w
+                    if (w.nextCursor <= cursor) break
+                    cursor = w.nextCursor
                 }
             }
         }
+        if (pairs.isEmpty()) return true
+        for (w in pairs) storeWorkout(w)
+        val now = System.currentTimeMillis() / 1000
+        val last = pairs.maxOf { it.summary.trackId } + 1
+        val saved = if (last > now) now else last
+        save(HistoryDataType.SPORT_SUMMARY, saved, now)
+        save(HistoryDataType.SPORT_DETAIL, saved, now)
+        return true
     }
 
-    private suspend fun store(received: List<HistoryRecord>) {
+    private suspend fun storeWorkout(w: WorkoutFetch.Workout) {
+        val now = System.currentTimeMillis() / 1000
+        val deleted = dao.deletedWorkoutsAll().any { it.start == w.summary.trackId }
+        val discarded = !deleted && discardedPhoneWorkout(workoutRow(w.summary))
+        if (deleted) {
+            log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: deleted in OpenStrap, skipped")
+        } else if (discarded) {
+            // The strap's copy of a phone workout discarded before it synced: deleted like one deleted here.
+            log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: over a discarded workout, skipped")
+            dao.insertDeletedWorkouts(listOf(DeletedWorkout(w.summary.trackId, null, now)))
+        } else if (w.summary.timestamp in MIN_VALID_EPOCH..now + FUTURE_SLACK) {
+            log("history workout ${Instant.ofEpochSecond(w.summary.trackId)}: type ${w.summary.sportType}, subtype ${w.summary.subtype}, ${w.detail?.heartRate?.size ?: 0} HR samples")
+            val storedBefore = dao.workout(w.summary.trackId).first() != null
+            dao.inTransaction { store(listOfNotNull(w.summary, w.detail)) }
+            val row = workoutRow(w.summary)
+            // One you started on the phone over the same time is the same workout: nothing new to tell.
+            val yours = Workouts.phoneTwin(row, dao.appWorkoutsOnce(row.start, row.end), now) != null
+            if (!yours && Workouts.notifyAutoDetected(row, storedBefore, now)) {
+                catching { onAutoDetected(row) }.onFailure { log("auto-detect notification: $it") }
+            }
+        } else {
+            log("history workout with impossible time ${w.summary.timestamp} dropped")
+        }
+    }
+
+    private suspend fun store(received: List<HistoryRecord>, partMinute: Long? = null) {
         val deleted = if (received.any { it is WorkoutSummary || it is WorkoutDetail || it is SportEffect || it is RecoveryHeartRate }) {
             dao.deletedWorkoutsAll()
         } else emptyList()
@@ -516,7 +584,7 @@ class HistorySync internal constructor(
         val extended = mutableListOf<ActivityExtendedMinute>()
         val raw = mutableListOf<RawRecord>()
         for (r in records) when (r) {
-            is ActivitySample -> activity += ActivityMinute(r.timestamp, r.steps, r.intensity, r.mode, r.heartRate)
+            is ActivitySample -> if (!r.isBlank) activity += ActivityMinute(r.timestamp, r.steps, r.intensity, r.mode, r.heartRate)
             // Per-second HR is averaged per minute to keep the database small.
             is SecondHeartRate -> r.heartRate?.let { perSecond.getOrPut(r.timestamp / 60 * 60) { mutableListOf() } += it }
             is SpotHeartRate -> r.heartRate?.let { hr += HeartRateSample(r.timestamp, it) }
@@ -565,11 +633,17 @@ class HistorySync internal constructor(
                 r.steps, r.calories, r.distanceCm,
             )
             is SleepRespiratoryEvent -> raw += RawRecord(HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT.code, r.timestamp, r.raw)
+            is org.openstrap.protocol.history.RawHistoryRecord -> raw += RawRecord(r.code, r.timestamp, r.raw)
             else -> Unit
         }
-        perSecond.forEach { (minute, values) -> hr += HeartRateSample(minute, values.average().toInt()) }
+        val partial = mutableListOf<HeartRateSample>()
+        perSecond.forEach { (minute, values) ->
+            val sample = HeartRateSample(minute, values.average().toInt())
+            if (minute == partMinute) partial += sample else hr += sample
+        }
         if (activity.isNotEmpty()) dao.insertActivity(activity)
         if (hr.isNotEmpty()) dao.insertHeartRate(hr)
+        if (partial.isNotEmpty()) dao.insertHeartRateIfMissing(partial)
         if (spo2.isNotEmpty()) dao.insertSpo2(spo2)
         if (stress.isNotEmpty()) dao.insertStress(stress)
         if (hrv.isNotEmpty()) dao.insertHrv(hrv)
@@ -665,152 +739,59 @@ class HistorySync internal constructor(
     private fun recordSize(code: Int, payload: ByteArray, sizeField: Long): Int =
         if (code != HistoryDataType.ACTIVITY.code) 4 else ActivityLayout.recordSize(payload, sizeField, session.features)
 
-    private fun dayStart(epoch: Long) = Days.start(epoch, zone)
-
     /** The day a record's moment falls on in the phone's zone, the day its row is stored under. */
     private fun dayOf(epoch: Long) = DayKey.dayOf(epoch, zone)
 
     companion object {
         private val HISTORY_CONTROL = java.util.UUID.fromString("00000004-0000-3512-2118-0009af100700")
         private val HISTORY_DATA = java.util.UUID.fromString("00000005-0000-3512-2118-0009af100700")
-        private const val DEFAULT_LOOKBACK = 2L * 24 * 3600
-        /**
-         * As far back as the strap keeps history. A fetch from 60 days back on firmware 3.25.0.3 returned the whole
-         * window for stress, skin temperature, extended activity and sleep, and each shorter type from its oldest
-         * record (02 "Verified on hardware: retention"), so asking from before what a type holds is safe.
-         */
-        private const val HISTORY_LOOKBACK = 60L * 24 * 3600
-        private const val DAY_SECONDS = 24 * 3600L
-
-        /**
-         * The newest stored key of the table a type fills ([store]), and how far before it to start. A [day] key is a
-         * date ([DayKey]), read as that date's local midnight.
-         */
-        private class NewestKey(val sql: String, val before: Long = 0, val day: Boolean = false)
-
-        private fun newest(table: String, column: String = "timestamp", before: Long = 0, where: String = "") =
-            NewestKey("SELECT MAX($column) FROM $table$where", before)
-
-        private fun newestDay(table: String) = NewestKey("SELECT MAX(day) FROM $table", DAY_SECONDS, day = true)
-
-        /**
-         * Types that share a table read its newest row, whichever type wrote it. A day key starts a day earlier: the
-         * strap dates a day's record by its own time, which can fall before the local midnight the row is keyed by.
-         */
-        private val NEWEST_KEY: Map<HistoryDataType, NewestKey> = buildMap {
-            put(HistoryDataType.ACTIVITY, newest("activity_minute"))
-            put(HistoryDataType.TODAY_ACTIVITY_EXTENDED, newest("activity_extended"))
-            for (t in listOf(HistoryDataType.HEART_RATE_MANUAL, HistoryDataType.SEC_HR, HistoryDataType.SEC_HR_V2)) {
-                put(t, newest("heart_rate"))
-            }
-            for (t in listOf(HistoryDataType.STRESS_SINGLE, HistoryDataType.STRESS_ALL_DAY)) put(t, newest("stress"))
-            put(HistoryDataType.SPO2_SINGLE, newest("spo2"))
-            put(HistoryDataType.SPO2_OSA, newest("sleep_spo2"))
-            for (t in listOf(HistoryDataType.SPO2_OSA_EVENT, HistoryDataType.SPO2_OSA_EVENT_ALT)) put(t, newest("osa_event"))
-            put(HistoryDataType.OSA_RESULT, newest("osa_result", "belongTime"))
-            put(HistoryDataType.HRV_RMSSD, newest("hrv"))
-            put(HistoryDataType.HRV_SDNN, newest("hrv_sdnn"))
-            put(HistoryDataType.PAI, newest("pai"))
-            put(HistoryDataType.BODY_TEMPERATURE_ALL_DAY, newest("skin_temperature"))
-            put(HistoryDataType.SLEEP_BREATH_RATE, newest("breath_rate"))
-            put(
-                HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT,
-                newest("raw_record", where = " WHERE type = ${HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT.code}"),
-            )
-            put(HistoryDataType.RECOVERY_HEART_RATE, newest("recovery_hr", "workoutStart"))
-            for (t in listOf(HistoryDataType.RESTING_HEART_RATE, HistoryDataType.REST_HR)) put(t, newestDay("resting_hr"))
-            put(HistoryDataType.DAILY_MAX_EXERCISE_HR, newestDay("daily_max_hr"))
-            put(HistoryDataType.SLEEP_RESULT, newestDay("sleep_session"))
-        }
-        /** Workouts are few and worth having: on first sync, take whatever the strap still holds. */
+        /** How far back a strap session's effects may replace a phone workout's model figures. */
         private const val WORKOUT_LOOKBACK = 30L * 24 * 3600
-        private val WORKOUT_TYPES = setOf(HistoryDataType.SPORT_SUMMARY, HistoryDataType.SPORT_DETAIL, HistoryDataType.SPORT_EFFECT)
+
+        /** Set once the stored cursors were moved to Zepp's rules ([migrateCursorsOnce]). */
+        internal const val CURSORS_ZEPP_KEY = "cursors_zepp_10105"
+
+
+        internal fun keyOf(type: HistoryDataType) = "gdsp_${type.code}"
+
+        /** The stored cursors a type's start is made from ([ZeppCursors.start]). */
+        private val ZEPP_READS: Map<HistoryDataType, List<HistoryDataType>> = mapOf(
+            HistoryDataType.DAILY_MAX_EXERCISE_HR to listOf(HistoryDataType.ACTIVITY),
+            HistoryDataType.SEC_HR to listOf(HistoryDataType.SEC_HR),
+            HistoryDataType.SEC_HR_V2 to listOf(HistoryDataType.SEC_HR),
+            HistoryDataType.SLEEP_RESPIRATORY_RATE_EVENT to listOf(HistoryDataType.SLEEP_BREATH_RATE),
+            HistoryDataType.SPORT_DETAIL to listOf(HistoryDataType.SPORT_SUMMARY),
+        )
+
         /** 2024-01-01: anything older comes from a strap whose clock was never set. */
         private const val MIN_VALID_EPOCH = 1_704_067_200L
         private const val FUTURE_SLACK = 120L
-        private const val MAX_CHUNKS_PER_TYPE = 50
+        /** Zepp's `xr3.d()`: failed exchanges allowed per type in one sync, 1 for types 79 and 96. */
+        private const val RETRIES = 3
+        private val SINGLE_TRY = setOf(79, 96)
+        /** The version reply per connection (Zepp clears its copy on disconnect; a gone session is never asked again). */
+        private val versions = java.util.WeakHashMap<ChannelSession, GdspMessage.VersionReply>()
         private const val DUMP_CHUNKS = 5
 
         /**
-         * The records of a chunk worth storing. Activity keeps only minutes that have ended: the strap sends the
-         * minute it is still counting and stale slots after it, and a later sync replaced those with the real
-         * minutes, so steps went up and then back down. Other types allow a strap clock a little ahead.
+         * The records worth storing. Unwritten minutes (all 0xFF) hold nothing. Others need a time after any strap
+         * clock was set, and all but the minute series one no later than a strap clock a little ahead.
          */
-        internal fun <R : HistoryRecord> keepable(type: HistoryDataType, records: List<R>, now: Long): List<R> =
+        internal fun <R : HistoryRecord> storable(type: HistoryDataType, records: List<R>, now: Long): List<R> =
             if (type in MINUTE_SERIES) {
-                records.filter { !isBlank(it) && it.timestamp >= MIN_VALID_EPOCH && it.timestamp < minuteStart(now) }
+                records.filter { !isBlank(it) && it.timestamp >= MIN_VALID_EPOCH }
             } else {
                 records.filter { it.timestamp in MIN_VALID_EPOCH..now + FUTURE_SLACK }
             }
 
-        /**
-         * Where the cursor goes after a chunk starting at [headerTime], or null to leave it.
-         *
-         * A chunk with nothing usable (only gap slots, or only impossible times) still moves the cursor past it, or
-         * the strap serves the same chunk on every sync. The chunk holds the earliest records after the cursor, so
-         * skipping it loses nothing, and the cap at now (the current minute for the minute series) keeps a strap
-         * clock that runs ahead from pushing the cursor into the future.
-         *
-         * Except recent blank minutes: the strap writes a minute a little after it ends and sends the slot blank
-         * until then, even with written minutes after it. Moving past that slot lost a minute that was never fetched
-         * (gaps of 2 to 10 minutes while heart rate had every one). So the cursor stops at the first blank minute
-         * still inside [UNWRITTEN_WAIT], and the minutes after it are fetched again, replacing the same rows.
-         */
-        internal fun nextCursor(
-            type: HistoryDataType,
-            headerTime: Long,
-            records: List<HistoryRecord>,
-            parsedNext: Long?,
-            kept: List<HistoryRecord>,
-            now: Long,
-        ): Long? {
-            if (parsedNext == null) return null
-            val next = firstRecentBlank(type, headerTime, records, parsedNext, now)
-                ?: if (kept.isEmpty()) parsedNext else parsedNext.coerceAtMost(kept.maxOf { it.timestamp } + MINUTE_SECONDS)
-            return next.coerceAtMost(latestCursor(type, now))
-        }
-
-        /**
-         * The earliest blank minute of a minute-series chunk the strap may still write. Activity's parser skips the
-         * blank slots before its first written minute (they run from [headerTime]), and stops at the first one after
-         * it ([parsedNext]). Extended activity keeps its blank slots as 0xFF records.
-         */
-        private fun firstRecentBlank(
-            type: HistoryDataType,
-            headerTime: Long,
-            records: List<HistoryRecord>,
-            parsedNext: Long,
-            now: Long,
-        ): Long? {
-            val blanks = when (type) {
-                HistoryDataType.ACTIVITY -> {
-                    val firstWritten = records.minOfOrNull { it.timestamp } ?: parsedNext
-                    (headerTime until firstWritten step MINUTE_SECONDS).toList()
-                }
-                HistoryDataType.TODAY_ACTIVITY_EXTENDED -> records.filter(::isBlank).map { it.timestamp }
-                else -> return null
-            }
-            return blanks.firstOrNull { it >= now - UNWRITTEN_WAIT }
-        }
-
-        /** An extended activity slot the strap hasn't written: all 0xFF, so its version byte is too. */
-        private fun isBlank(r: HistoryRecord): Boolean = r is TodayActivityExtended && r.version == BLANK_VERSION
+        /** A minute slot the strap hasn't written: all 0xFF (extended activity: its version byte is too). */
+        private fun isBlank(r: HistoryRecord): Boolean =
+            (r is TodayActivityExtended && r.version == BLANK_VERSION) || (r is ActivitySample && r.isBlank)
 
         private const val BLANK_VERSION = 0xFF
 
         /** One row a minute, written by the strap a little after the minute ends. */
         private val MINUTE_SERIES = setOf(HistoryDataType.ACTIVITY, HistoryDataType.TODAY_ACTIVITY_EXTENDED)
-
-        /** How long the strap may take to write a minute; blank slots older than this are real gaps. */
-        private const val UNWRITTEN_WAIT = 10 * 60L
-
-        /** How far a type's cursor may move: the minute series stop at the current minute, so it is fetched once it ends. */
-        internal fun latestCursor(type: HistoryDataType, now: Long): Long =
-            if (type in MINUTE_SERIES) minuteStart(now) else now
-
-        private const val MINUTE_SECONDS = 60L
-
-        private fun minuteStart(epoch: Long) = epoch / MINUTE_SECONDS * MINUTE_SECONDS
     }
 }
 
@@ -864,7 +845,7 @@ internal fun syncKindName(t: HistoryDataType, strings: Strings = Strings.app): S
 /** Each named kind of data and the strap types it covers. */
 private val SYNC_KIND_NAMES: Map<HistoryDataType, Int> = listOf(
     R.string.system_sync_kind_activity to listOf(HistoryDataType.ACTIVITY, HistoryDataType.TODAY_ACTIVITY_EXTENDED),
-    R.string.system_sync_kind_sleep to listOf(HistoryDataType.SLEEP_RESULT),
+    R.string.system_sync_kind_sleep to listOf(HistoryDataType.SLEEP_RESULT, HistoryDataType.SLEEP_PLAN),
     R.string.system_sync_kind_hrv to listOf(HistoryDataType.HRV_RMSSD, HistoryDataType.HRV_SDNN),
     R.string.system_sync_kind_resting_hr to listOf(HistoryDataType.REST_HR, HistoryDataType.RESTING_HEART_RATE),
     R.string.system_sync_kind_heart_rate to listOf(HistoryDataType.HEART_RATE_MANUAL, HistoryDataType.SEC_HR, HistoryDataType.SEC_HR_V2),
@@ -882,5 +863,6 @@ private val SYNC_KIND_NAMES: Map<HistoryDataType, Int> = listOf(
         HistoryDataType.BODY_TEMPERATURE_ALL_DAY, HistoryDataType.BODY_TEMPERATURE_SINGLE, HistoryDataType.BODY_TEMPERATURE_80S,
         HistoryDataType.TEMPERATURE_LEGACY,
     ),
+    R.string.system_sync_kind_strap_stats to listOf(HistoryDataType.DEVICE_STATISTIC),
     R.string.system_sync_kind_workouts to listOf(HistoryDataType.SPORT_SUMMARY, HistoryDataType.SPORT_DETAIL, HistoryDataType.SPORT_EFFECT),
 ).flatMap { (id, types) -> types.map { it to id } }.toMap()

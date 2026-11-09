@@ -46,6 +46,17 @@ data class ActivitySample(
     val heartRate: Int? get() = HeartRateSentinel.valid(rawHeartRate)
     val mode: Int get() = if (rawMode == ActivityMode.BLANK) rawMode else rawMode and 0x0F
     val isWorn: Boolean get() = mode != ActivityMode.NOT_WORN && mode != ActivityMode.CHARGING
+
+    /** A slot the strap hasn't written: every byte 0xFF. Zepp counts it as a minute; it holds no data. */
+    val isBlank: Boolean
+        get() = listOfNotNull(
+            rawMode, intensity, steps, rawHeartRate,
+            sleepExtra?.retain, sleepExtra?.sleepPostureAndProb, sleepExtra?.sleepProbDeep, sleepExtra?.sleepProbRem,
+        ).all { it == BLANK_BYTE }
+
+    private companion object {
+        const val BLANK_BYTE = 0xFF
+    }
 }
 
 // UNVERIFIED: 02 §3.1 - bit-level meaning of bytes 4..7 is unknown; exposed raw.
@@ -237,6 +248,9 @@ data class SleepBreathRate(
 
 /** Type 57: opaque 569-byte event kept raw for later processing. */
 class SleepRespiratoryEvent(override val timestamp: Long, val tzQuarters: Int, val raw: ByteArray) : HistoryRecord
+
+/** A record kept whole because unstrap doesn't read it yet: sleep plan (66), device statistics (44). */
+class RawHistoryRecord(val code: Int, override val timestamp: Long, val raw: ByteArray) : HistoryRecord
 
 /** Type 70: recovery HR after a workout. [timestamp] is the trackId (= workout start epoch). */
 data class RecoveryHeartRate(override val timestamp: Long, val samples: List<Int>) : HistoryRecord {

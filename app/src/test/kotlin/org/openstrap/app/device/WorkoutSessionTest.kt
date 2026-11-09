@@ -157,6 +157,37 @@ class WorkoutSessionTest {
         assertEquals(180, WorkoutRecorder.activeSeconds(saved, saved.end!!))
     }
 
+    /** Zepp's `bo60.j(2)` on a reconnect: the config, then PAUSE while paused, RESUME once resumed, else START. */
+    @Test
+    fun reconnectSendsTheConfigAndOneStateAsZepp() {
+        val s = session()
+        var battery = 80
+        // A new battery level each time, so the state flow can't fold a quick drop and return into no change.
+        fun reconnect(): Pair<SportSession.State, Boolean> {
+            strap.sportStates.clear()
+            strap.connection.value = ConnectionState.Connected(battery--, "3.27.0.1")
+            return runBlocking {
+                withTimeout(WAIT_MS) {
+                    while (strap.sportStates.none { it.second }) delay(POLL_MS)
+                    strap.sportStates.single { it.second }
+                }
+            }
+        }
+        s.start(sportType = 1)
+        s.recording()
+        assertEquals(SportSession.State.START to true, reconnect())
+        clock.advance(Duration.ofSeconds(60))
+        s.pause()
+        s.recording { it.paused }
+        assertEquals(SportSession.State.PAUSE to true, reconnect())
+        clock.advance(Duration.ofSeconds(60))
+        s.resume()
+        s.recording { !it.paused }
+        assertEquals(SportSession.State.RESUME to true, reconnect())
+        s.end()
+        s.state.await { it is WorkoutState.Ended }
+    }
+
     @Test
     fun endedWhilePausedEndsWhereThePauseBegan() {
         val s = session()
@@ -798,7 +829,7 @@ class WorkoutSessionTest {
     /** A strap that is never connected, whose live heart rate is [readings], and whose syncs end when [synced] says. */
     private class FakeStrap : StrapController {
         val readings = MutableSharedFlow<Int>(replay = 1, extraBufferCapacity = 64)
-        override val connection: StateFlow<ConnectionState> = MutableStateFlow(ConnectionState.Disconnected)
+        override val connection = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
         override val sync: StateFlow<SyncState> = MutableStateFlow(SyncState.Idle)
         override val syncRecord: StateFlow<SyncRecord> = MutableStateFlow(SyncRecord())
         /** A sync's end, for the test to send. */
@@ -830,7 +861,8 @@ class WorkoutSessionTest {
                 throw IllegalStateException("strap refused")
             }
         }
-        override fun setEffortWatch(active: Boolean) = Unit
+        override fun showLiveHeartRate(key: Any, shown: Boolean) = Unit
+        override suspend fun checkCanRestart() = Unit
         override suspend fun installFirmware(file: ByteArray, type: Int, onProgress: (org.openstrap.protocol.firmware.DfuProgress) -> Unit) = Unit
         override suspend fun readAlarms(): Pair<AlarmCapabilities, List<Alarm>> = throw StrapCommandException("not connected")
         override suspend fun saveAlarm(alarm: Alarm, isNew: Boolean) = Unit
@@ -840,7 +872,11 @@ class WorkoutSessionTest {
         override suspend fun writeHealthSettings(version: Int, settings: List<Setting>) = Unit
         override suspend fun restartStrap() = Unit
         override suspend fun buzz(pattern: List<Int>) = Unit
-        override suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long) = Unit
+        override suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long, reconnect: Boolean) {
+            sportStates += state to reconnect
+        }
+
+        val sportStates: MutableList<Pair<SportSession.State, Boolean>> = Collections.synchronizedList(mutableListOf())
         override suspend fun sportSessionKeepAlive() = Unit
         override suspend fun startCallBuzz(pulsed: Boolean) = Unit
         override suspend fun stopCallBuzz() = Unit
