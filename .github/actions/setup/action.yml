@@ -12,8 +12,9 @@ runs:
 
     - uses: gradle/actions/setup-gradle@v5
 
+    # bash -e {0}, as a workflow's own run steps: `shell: bash` adds pipefail, and `yes` ends on a closed pipe.
     - name: Install Android SDK packages
-      shell: bash
+      shell: bash -e {0}
       run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.2" "build-tools;36.0.0" > /dev/null
 
     # Robolectric downloads its Android jar (about 200 MB) from Maven Central into ~/.m2 while the tests run, outside
