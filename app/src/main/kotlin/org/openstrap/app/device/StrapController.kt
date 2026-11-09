@@ -114,7 +114,7 @@ interface StrapController {
 
     /**
      * A sync the user asked for (pull-to-refresh, the widget, the notification, Sync now). As Zepp's user action, it
-     * runs only if more than 120 s have passed since the last good sync, else it shows a moment of progress only.
+     * runs only if more than 120 s have passed since the last good sync, else nothing happens.
      */
     fun syncNow()
 

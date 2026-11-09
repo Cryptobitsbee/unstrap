@@ -93,8 +93,8 @@ internal class SyncCoordinator(
 
     /**
      * A user action (the app comes to the front, pull-to-refresh, the widget, the notification's Sync, Sync now): a
-     * full sync if more than 120 s since the last successful one, else a 1 s progress with nothing sent, as Zepp's
-     * USER_ACTION does.
+     * full sync if more than 120 s since the last successful one, as Zepp's USER_ACTION. Else nothing goes to the strap,
+     * as in Zepp, and unlike Zepp nothing shows either: its 1 s of progress looked like a real sync.
      */
     fun userAction() {
         scope.launch {
@@ -102,8 +102,7 @@ internal class SyncCoordinator(
             if (SyncPolicy.successGapPassed(clock(), lastSuccessMs())) {
                 enqueue(SyncTask.Full(SyncTask.Trigger.USER_ACTION))
             } else {
-                log("sync: last sync under 120 s ago, progress only")
-                fakeProgress(USER_ACTION_FAKE_MS)
+                log("sync: last sync under 120 s ago, nothing sent")
             }
         }
     }
@@ -147,8 +146,8 @@ internal class SyncCoordinator(
         if (s == null || client == null) return log("sync: $task dropped, not connected")
         if (firmwareUpdating.value) return log("sync: $task dropped, firmware update running")
         if (task is SyncTask.Full && !task.forceAll && policy.mock(lastStartMs, clock())) {
-            log("sync: $task within 60 s of the last, progress only")
-            return fakeProgress(MOCK_FAKE_MS)
+            // Zepp shows 2 s of progress here (its mock sync). unstrap shows nothing, as nothing is synced.
+            return log("sync: $task within 60 s of the last, nothing sent")
         }
         if (task !is SyncTask.Demand) lastStartMs = clock()
         log("sync: $task")
@@ -172,14 +171,6 @@ internal class SyncCoordinator(
         } finally {
             running = false
         }
-    }
-
-    /** Zepp's progress with nothing sent: Running for [ms], then back to what it showed. */
-    private suspend fun fakeProgress(ms: Long) {
-        val before = sync.value
-        sync.value = SyncState.Running(Strings.app.get(R.string.system_sync_preparing))
-        delay(ms)
-        if (sync.value is SyncState.Running) sync.value = before
     }
 
     /** When the last full sync started, of any kind but a push's (Zepp's lastSyncTimeMap). */
@@ -257,10 +248,6 @@ internal class SyncCoordinator(
     private fun nowSeconds() = clock() / MILLIS_PER_SECOND
 
     private companion object {
-        /** Zepp's USER_ACTION progress with nothing sent (`h2d` case 1). */
-        const val USER_ACTION_FAKE_MS = 1_000L
-        /** Zepp's mock sync: ten progress steps 200 ms apart (`bxt.b`). */
-        const val MOCK_FAKE_MS = 2_000L
         /** Pushes after which Zepp queues a full sync too (`rqi` case 1). */
         val WORKOUT_PUSHES = setOf(5, 6)
         /** The activity cursor, Zepp's device lastSyncTime for the background sync. */
