@@ -377,7 +377,17 @@ class WorkoutSession(
         }
         if (p is org.openstrap.protocol.services.SportSession.Push.Status && p.status == org.openstrap.protocol.services.SportSession.STATUS_HR_NORMAL) {
             if (r.paused || !r.workout.askToEnd || r.endPrompt != null) return
-            askToEnd(WorkoutRecorder.lastActive(window, steps, restingHr, r.maxHeartRate)?.takeIf { it > r.workout.start } ?: now())
+            // As Zepp (`lak.f`, `bo60.m`): the strap's workout status first, and the question only once it answers.
+            scope.launch {
+                val status = strap.sportStatus()
+                if (status == null) {
+                    log("workout: no strap status, no end question")
+                    return@launch
+                }
+                log("workout: strap status ${status.status}, asking to end")
+                val rec = _state.value as? WorkoutState.Recording ?: return@launch
+                askToEnd(WorkoutRecorder.lastActive(window, steps, restingHr, rec.maxHeartRate)?.takeIf { it > rec.workout.start } ?: now())
+            }
         }
     }
 

@@ -134,12 +134,37 @@ internal class StrapCommands(
         SettingsCodec.parse(reply, settingsProtocol?.version)?.get(SettingsCodec.KEY_FAST_RECHARGE)?.bool
     }.onFailure { log("fast-charge query failed: $it") }.getOrNull()
 
-    /** Learned with the first START on each connection. */
+    /** Learned on each connection ([querySportVersion]), or else with the first workout command on it. */
     @Volatile private var sportCaps: SportSession.Capabilities? = null
 
-    /** A new connection: the next START asks the sport module's version again. */
+    /** A new connection: the sport module's version is asked again. */
     fun forgetSportCaps() {
         sportCaps = null
+    }
+
+    /** Zepp's `wok.s0` on every connect: 0x0019 `01`, kept for the workout commands. A failure is only logged. */
+    suspend fun querySportVersion() {
+        val s = link.activeSession ?: return
+        if (!s.services.has(SportSession.ENDPOINT)) return
+        catching {
+            val r = s.request(SportSession.ENDPOINT, SportSession.versionRequest, COMMAND_TIMEOUT_MS) {
+                SportSession.isReplyTo(SportSession.versionRequest, it)
+            }
+            log("sport version ${r.toHex()}")
+            SportSession.parseVersion(r)?.let { sportCaps = it }
+        }.onFailure { log("sport version not read: $it") }
+    }
+
+    /** 0x0019 `06 00`, the strap's workout status; null when it doesn't answer or refuses. */
+    suspend fun sportStatus(): SportSession.DeviceStatus? {
+        val s = link.activeSession?.takeIf { it.services.has(SportSession.ENDPOINT) } ?: return null
+        return catching {
+            val r = s.request(SportSession.ENDPOINT, SportSession.statusQuery, COMMAND_TIMEOUT_MS) {
+                SportSession.isReplyTo(SportSession.statusQuery, it)
+            }
+            log("sport status ${r.toHex()}")
+            SportSession.parseStatus(r)
+        }.onFailure { log("sport status not read: $it") }.getOrNull()
     }
 
     // Each throw is a reason the user is shown.

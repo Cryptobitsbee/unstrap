@@ -192,6 +192,9 @@ interface StrapController {
         reconnect: Boolean,
     )
 
+    /** The strap's workout status (0x0019 `06 00`), or null when it doesn't answer. */
+    suspend fun sportStatus(): org.openstrap.protocol.services.SportSession.DeviceStatus? = null
+
     /** The strap's sport-module keep-alive while a workout is paused, every 5 s. */
     suspend fun sportSessionKeepAlive()
 

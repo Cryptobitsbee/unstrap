@@ -118,9 +118,11 @@ internal class LiveHeartRateStream(
                 val channel = s.services.has(Endpoints.HEART_RATE)
                 listen(s, client, channel)
                 if (channel) {
+                    // Zepp's `az5`: up to 15 s for the open's answer, and 0x0048 only once it is `05 00`.
                     val opened = s.request(Endpoints.OPEN_APP, LiveHeartRate.OPEN, OPEN_TIMEOUT_MS) { it.u8(0) == OPEN_REPLY }
                     log("live hr open: ${opened.toHex()}")
-                    val subscribed = s.request(Endpoints.HEART_RATE, LiveHeartRate.SUBSCRIBE, OPEN_TIMEOUT_MS) {
+                    check(opened.size >= 2 && opened.u8(1) == OPEN_OK) { "live hr open refused: ${opened.toHex()}" }
+                    val subscribed = s.request(Endpoints.HEART_RATE, LiveHeartRate.SUBSCRIBE, SUBSCRIBE_TIMEOUT_MS) {
                         it.u8(0) == SUBSCRIBE_REPLY
                     }
                     log("live hr subscribe: ${subscribed.toHex()}")
@@ -241,7 +243,9 @@ internal class LiveHeartRateStream(
     }
 
     private companion object {
-        const val OPEN_TIMEOUT_MS = 5_000L
+        const val OPEN_TIMEOUT_MS = 15_000L
+        const val OPEN_OK = 0x00
+        const val SUBSCRIBE_TIMEOUT_MS = 5_000L
         const val OPEN_REPLY = 0x05
         const val SUBSCRIBE_REPLY = 0x04
         const val STALE_CHECK_MS = 2_000L

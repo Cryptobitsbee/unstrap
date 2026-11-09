@@ -474,6 +474,7 @@ class StrapManager(
     private fun CoroutineScope.watchSportSession(s: ChannelSession) = launch {
         commands.forgetSportCaps()
         if (!s.services.has(SportSession.ENDPOINT)) return@launch
+        launch { commands.querySportVersion() }
         s.messagesFor(SportSession.ENDPOINT).collect { p ->
             if (p.isNotEmpty() && p.u8(0) == SportSession.REPLY) return@collect
             log("sport < ${p.toHex()}")
@@ -493,6 +494,8 @@ class StrapManager(
     ) = commands.sportSession(state, sportType, startTime, elapsedSeconds, reconnect)
 
     override suspend fun sportSessionKeepAlive() = commands.sportSessionKeepAlive()
+
+    override suspend fun sportStatus() = commands.sportStatus()
 
     /** The strap's `07` once buzzing has stopped; it also ends Find strap. */
     private fun CoroutineScope.watchFindDevice(s: ChannelSession) = launch {
