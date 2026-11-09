@@ -208,12 +208,6 @@ class HistorySync internal constructor(
                 .takeStrapEffects(System.currentTimeMillis() / 1000 - WORKOUT_LOOKBACK, WorkoutSession.LOCK)
         }
             .onFailure { log("strap effect: $it") }
-        // A night from the strap's minute sleep signal where its own sleep result is missing or wrong (firmware 3.27.0.1).
-        catching {
-            org.openstrap.app.data.MinuteSleep.apply(dao, zone, System.currentTimeMillis() / 1000, cursors.get(MINUTES_CHECKED_KEY))
-        }
-            .onSuccess { if (it.isNotEmpty()) log("history: sleep from the minute signal for $it") }
-            .onFailure { log("minute sleep: $it") }
         // Sleep deleted over a week ago goes for good, and a copy the strap just sent again with it.
         catching { org.openstrap.app.data.SleepSource(dao).purgeExpired(System.currentTimeMillis() / 1000) }
             .onSuccess { if (it > 0) log("history: removed $it sleep sessions deleted over a week ago") }
@@ -398,14 +392,9 @@ class HistorySync internal constructor(
     // Each break ends the type for a reason of its own.
     @Suppress("CyclomaticComplexMethod", "LongMethod", "LoopWithTooManyJumpStatements")
     private suspend fun syncType(spec: HistoryTypeSpec): Boolean {
-        val start = startOf(spec.type, System.currentTimeMillis() / 1000)
-        var cursor = start
-        // Minutes fetched long after they were recorded can come back hours late: no nights are made from them.
         val now = System.currentTimeMillis() / 1000
-        if (spec.type == HistoryDataType.ACTIVITY && cursor < now - org.openstrap.app.data.MinuteSleep.CATCHUP_SECONDS) {
-            log("history: catching up minutes from ${Instant.ofEpochSecond(cursor)}, no nights made from them")
-            cursors.set(MINUTES_CHECKED_KEY, now)
-        }
+        val start = startOf(spec.type, now)
+        var cursor = start
         // Zepp's `l59.f`: up to 3 failed exchanges per type in a sync (1 for 79 and 96), each repeating the same cursor,
         // and no cap on chunks while the cursor moves on. The ACK has gone out before anything here is parsed.
         var retries = if (spec.code in SINGLE_TRY) 1 else RETRIES
@@ -758,9 +747,6 @@ class HistorySync internal constructor(
         private val HISTORY_DATA = java.util.UUID.fromString("00000005-0000-3512-2118-0009af100700")
         /** How far back a strap session's effects may replace a phone workout's model figures. */
         private const val WORKOUT_LOOKBACK = 30L * 24 * 3600
-
-        /** When the last minutes catch-up ended ([org.openstrap.app.data.MinuteSleep.CATCHUP_SECONDS]). */
-        internal const val MINUTES_CHECKED_KEY = "minutes_checked_from"
 
         /** Set once the stored cursors were moved to Zepp's rules ([migrateCursorsOnce]). */
         internal const val CURSORS_ZEPP_KEY = "cursors_zepp_10105"
