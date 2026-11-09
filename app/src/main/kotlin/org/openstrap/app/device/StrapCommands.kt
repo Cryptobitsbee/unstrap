@@ -49,12 +49,17 @@ internal class StrapCommands(
         return reply
     }
 
-    private var alarmCaps: AlarmCapabilities? = null
+    /** The alarm module's version for the connection it was read on: Zepp's `sq0.l`, asked again after a reconnect. */
+    private var alarmCaps: Pair<ChannelSession, AlarmCapabilities>? = null
 
-    private suspend fun alarmCaps(): AlarmCapabilities = alarmCaps ?: (
-        AlarmCodec.parseVersion(command(Endpoints.ALARMS, AlarmCodec.versionRequest))
+    private suspend fun alarmCaps(): AlarmCapabilities {
+        val s = link.activeSession
+        alarmCaps?.takeIf { it.first === s }?.let { return it.second }
+        val caps = AlarmCodec.parseVersion(command(Endpoints.ALARMS, AlarmCodec.versionRequest))
             ?: throw StrapCommandException(R.string.system_command_alarm_reply)
-        ).also { alarmCaps = it }
+        if (s != null) alarmCaps = s to caps
+        return caps
+    }
 
     suspend fun readAlarms(): Pair<AlarmCapabilities, List<Alarm>> {
         val caps = alarmCaps()
