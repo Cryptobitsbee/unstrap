@@ -144,7 +144,7 @@ internal class StrapCommands(
 
     // Each throw is a reason the user is shown.
     @Suppress("ThrowsCount")
-    suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long) {
+    suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long, reconnect: Boolean) {
         val s = link.activeSession ?: throw StrapCommandException(R.string.system_command_not_connected)
         if (!s.services.has(SportSession.ENDPOINT)) throw StrapCommandException(R.string.system_command_no_sport_module)
         suspend fun send(request: ByteArray): ByteArray {
@@ -159,7 +159,8 @@ internal class StrapCommands(
                 SportSession.parseVersion(send(SportSession.versionRequest))
                     ?: throw StrapCommandException(R.string.system_command_sport_version)
                 ).also { sportCaps = it }
-        if (state == SportSession.State.START) send(SportSession.config(sportType, caps))
+        // Zepp's `bo60.j`: the config before START, and before whatever state goes out again on a reconnect.
+        if (state == SportSession.State.START || reconnect) send(SportSession.config(sportType, caps))
         send(SportSession.state(state, startTime, elapsedSeconds, caps))
     }
 

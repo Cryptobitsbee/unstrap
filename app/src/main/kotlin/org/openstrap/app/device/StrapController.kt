@@ -180,10 +180,17 @@ interface StrapController {
     suspend fun buzz(pattern: List<Int>)
 
     /**
-     * Sends a workout state to the strap's sport module (0x0019): START also learns the module and sends the config
-     * first. Throws [StrapCommandException] when not connected, refused, or the strap has no such module.
+     * Sends a workout state to the strap's sport module (0x0019): START, and any state with [reconnect], also learns
+     * the module and sends the config first. Throws [StrapCommandException] when not connected, refused, or the strap
+     * has no such module.
      */
-    suspend fun sportSession(state: org.openstrap.protocol.services.SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long)
+    suspend fun sportSession(
+        state: org.openstrap.protocol.services.SportSession.State,
+        sportType: Int,
+        startTime: Long,
+        elapsedSeconds: Long,
+        reconnect: Boolean,
+    )
 
     /** The strap's sport-module keep-alive while a workout is paused, every 5 s. */
     suspend fun sportSessionKeepAlive()

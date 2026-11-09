@@ -319,6 +319,16 @@ class WorkoutSession(
      * (codemap 05 §5, 03 §3.20). The strap's own pause and stop (`11`) and ABANDON are followed but untried on hardware.
      */
 
+    /**
+     * The one state a reconnect sends after the config, as Zepp picks it from its engine state (verdict 25,
+     * d/bo60.java:472-480): PAUSE while paused, RESUME once resumed from a pause, else START with the original start.
+     */
+    internal fun reconnectState(w: AppWorkout) = when {
+        w.pausedAt != null -> org.openstrap.protocol.services.SportSession.State.PAUSE
+        w.pauseRanges.isNotEmpty() -> org.openstrap.protocol.services.SportSession.State.RESUME
+        else -> org.openstrap.protocol.services.SportSession.State.START
+    }
+
     /** Read at each start: whether a phone workout also runs a session on the strap ([SettingsStore.strapSessions]). */
     @Volatile private var strapSessions = true
     private var keepAlive: Job? = null
@@ -327,11 +337,16 @@ class WorkoutSession(
      * Tells the strap's sport module, when that's on; a failure is logged and the phone recording carries on. [send]
      * false when the strap made the change itself: nothing goes out, but a pause still gets its keep-alive.
      */
-    private fun strapState(state: org.openstrap.protocol.services.SportSession.State, w: AppWorkout, send: Boolean = true) {
+    private fun strapState(
+        state: org.openstrap.protocol.services.SportSession.State,
+        w: AppWorkout,
+        send: Boolean = true,
+        reconnect: Boolean = false,
+    ) {
         if (!strapSessions) return
         val elapsed = WorkoutRecorder.activeSeconds(w, now())
         if (send) scope.launch {
-            catching { strap.sportSession(state, w.sportType, w.start, elapsed) }
+            catching { strap.sportSession(state, w.sportType, w.start, elapsed, reconnect) }
                 .onFailure { (strap as? StrapManager)?.log("strap session $state not sent: ${it.message}") }
         }
         keepAlive?.cancel()
@@ -936,13 +951,12 @@ class WorkoutSession(
             launch { strap.heartRateReadings.collect(::onReading) }
             if (strapSessions) {
                 launch { strap.sportSessionPushes.collect(::onStrapPush) }
-                // On every connect, START again with the original start (Zepp's resume after a disconnect), then pause if paused.
+                // On every connect, the workout again as Zepp's `bo60.j(2)`: the config, then one state.
                 launch {
                     strap.connection.collect { c ->
                         if (c !is ConnectionState.Connected) return@collect
                         val now = (_state.value as? WorkoutState.Recording)?.workout ?: return@collect
-                        strapState(org.openstrap.protocol.services.SportSession.State.START, now)
-                        if (now.pausedAt != null) strapState(org.openstrap.protocol.services.SportSession.State.PAUSE, now)
+                        strapState(reconnectState(now), now, reconnect = true)
                     }
                 }
             }

@@ -484,8 +484,13 @@ class StrapManager(
         }
     }
 
-    override suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long) =
-        commands.sportSession(state, sportType, startTime, elapsedSeconds)
+    override suspend fun sportSession(
+        state: SportSession.State,
+        sportType: Int,
+        startTime: Long,
+        elapsedSeconds: Long,
+        reconnect: Boolean,
+    ) = commands.sportSession(state, sportType, startTime, elapsedSeconds, reconnect)
 
     override suspend fun sportSessionKeepAlive() = commands.sportSessionKeepAlive()
 
