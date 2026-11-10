@@ -81,6 +81,7 @@ class AppContainer(val app: Application) {
         workoutState = { workout.state.value },
         location = { org.openstrap.app.device.locationAvailable(app) },
         placed = { org.openstrap.app.widget.placedWidgets(app) },
+        bluetoothOff = { strap.connection.value == org.openstrap.app.device.ConnectionState.BluetoothOff },
     )
 
     /** The moment as the Moment widget reads it, for the strap's notification: its name, lead and Today's sentence. */

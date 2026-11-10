@@ -245,7 +245,7 @@ class StrapService : LifecycleService() {
     /** What the everyday notification says; equal content isn't posted again. */
     private data class IdleContent(
         val title: String, val text: String, val header: String?, val syncedAt: Long?, val progress: Float?, val syncing: Boolean,
-        val retry: Boolean, val connected: Boolean, val sport: Int, val problem: String?,
+        val retry: Boolean, val connected: Boolean, val sport: Int, val problem: String?, val bluetoothOff: Boolean = false,
     )
 
     /**
@@ -269,12 +269,14 @@ class StrapService : LifecycleService() {
             retry = c is ConnectionState.Failed && !c.keyRejected, connected = connected != null,
             sport = f?.sport ?: Workouts.DEFAULT_SPORTS.first(),
             problem = when { c is ConnectionState.Failed -> "failed"; low -> "low"; problem != null -> "off"; else -> null },
+            bluetoothOff = c is ConnectionState.BluetoothOff,
         )
     }
 
     /** What's wrong, as the title: the strap out of reach, not connected, or low. Null when nothing is. */
     private fun problemTitle(c: ConnectionState, low: Boolean, battery: Int?): String? = when {
         c is ConnectionState.Failed -> getString(R.string.system_strap_failed)
+        c is ConnectionState.BluetoothOff -> getString(R.string.system_strap_bluetooth_off)
         c is ConnectionState.Connected -> if (low) getString(R.string.system_strap_low_battery, battery) else null
         c is ConnectionState.Connecting || c is ConnectionState.Authenticating -> null
         else -> getString(R.string.system_strap_not_connected)
@@ -349,12 +351,19 @@ class StrapService : LifecycleService() {
         i.syncedAt?.let { b.setShowWhen(true).setWhen(it * 1000) } ?: b.setShowWhen(false)
         if (i.syncing) b.setProgress(100, ((i.progress ?: 0f) * 100).roundToInt(), i.progress == null)
         if (i.retry) b.addAction(NotificationCompat.Action(0, getString(R.string.system_strap_action_retry), service(ACTION_RETRY)))
+        if (i.bluetoothOff) b.addAction(NotificationCompat.Action(0, getString(R.string.system_strap_action_turn_on), turnOnBluetooth()))
         if (i.connected) {
             b.addAction(NotificationCompat.Action(0, getString(R.string.system_strap_action_start_workout), startWorkout(i.sport)))
             if (!i.syncing) b.addAction(NotificationCompat.Action(0, getString(R.string.system_strap_action_sync), service(ACTION_SYNC)))
         }
         return b.build()
     }
+
+    /** Android's dialog to turn Bluetooth on, from the notification's Turn on. */
+    private fun turnOnBluetooth(): PendingIntent = PendingIntent.getActivity(
+        this, REQUEST_BLUETOOTH, Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     private fun startWorkout(sport: Int): PendingIntent = PendingIntent.getActivity(
         this, REQUEST_START,
@@ -638,6 +647,7 @@ class StrapService : LifecycleService() {
         private const val SAVED_CHANNEL = "workout_saved"
         private const val REQUEST_START = 5
         private const val REQUEST_UNDO = 6
+        private const val REQUEST_BLUETOOTH = 7
         private const val CONFIRM_MS = 6_000L
         private const val FIGURES_REFRESH_MS = 30 * 60_000L
         /** The red dot in the "OS." logo, the app's heart colour: zone 5's red. */

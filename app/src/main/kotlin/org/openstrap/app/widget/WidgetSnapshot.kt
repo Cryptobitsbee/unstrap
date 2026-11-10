@@ -58,6 +58,8 @@ class WidgetData(
     val recovery: RecoveryRead?,
     val sleep: Result<SleepRead>?,
     val momentWidget: Result<MomentWidgetInput>?,
+    /** Bluetooth is off on the phone, which the status line says before anything about the strap. */
+    val bluetoothOff: Boolean = false,
 ) {
     /** The moment's inputs with [bedtime], null when they couldn't be read. */
     fun momentInputs(bedtime: LocalTime?): MomentInputs? = moment?.getOrNull()?.copy(usualBedtime = bedtime)
@@ -110,6 +112,8 @@ class WidgetSnapshot(
     private val location: () -> Boolean,
     /** The widgets placed now. */
     private val placed: () -> Set<WidgetKind>,
+    /** Whether Bluetooth is off on the phone now. */
+    private val bluetoothOff: () -> Boolean = { false },
 ) {
     suspend fun gather(kinds: Set<WidgetKind>, now: Instant, zone: ZoneId): WidgetData {
         val today = now.atZone(zone).toLocalDate()
@@ -134,6 +138,7 @@ class WidgetSnapshot(
             zone = zone,
             strap = strap,
             syncing = isSyncing,
+            bluetoothOff = bluetoothOff(),
             moment = moment,
             usualBedtime = bedtime,
             steps = goal?.takeIf { WidgetKind.Steps in kinds }?.let { StepsRead(it, day) },
