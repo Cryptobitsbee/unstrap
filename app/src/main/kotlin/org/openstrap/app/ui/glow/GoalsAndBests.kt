@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -20,7 +21,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.runtime.remember
-import androidx.compose.foundation.layout.height
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.TextStyle
+import java.time.format.TextStyle as DayStyle
 import java.util.Locale
 import org.openstrap.app.R
 import org.openstrap.app.data.Rewards
@@ -45,21 +45,19 @@ import org.openstrap.app.ui.glow.draw.level
 
 /*
  * The Goals and bests page from You (workouts spec 3.5, board AchievementsV1), All badges, and the weekly recap the
- * Monday notification opens (board WeeklyRecap).
+ * Monday notification opens (board WeeklyRecap). The pages show each best and badge as its medal ([Medal]) with only
+ * its name and figure; a tap opens its sheet, with what it is, when it was earned and how far along a locked one is.
  */
 
 /** The goal colour: met weeks, the goal moment. */
 private val GoalColor = MetricColors.good
 
-/** What a badge's art reads on these pages: the first weekly goal shows the goal it was met at, or this week's while locked. */
-private fun RewardsView.face(b: Rewards.Badge): String =
-    earned.firstOrNull { it.id == b.id }?.let { RewardsCopy.face(b, Rewards.goalAt(it, weeks, firstDay, ZoneId.systemDefault())) }
-        ?: RewardsCopy.face(b, goal)
-
 /** The days of [first]'s week, each a letter and whether a workout in [view] counted on it. */
 private fun weekDots(view: RewardsView, first: LocalDate, zone: ZoneId = ZoneId.systemDefault()): List<Pair<String, Boolean>> {
     val days = view.counted.map { Instant.ofEpochSecond(it.shownStart).atZone(zone).toLocalDate() }.toSet()
-    return (0L until 7L).map { first.plusDays(it).let { d -> d.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()) to (d in days) } }
+    return (0L until 7L).map { i ->
+        first.plusDays(i).let { d -> d.dayOfWeek.getDisplayName(DayStyle.NARROW, Locale.getDefault()) to (d in days) }
+    }
 }
 
 /**
@@ -98,6 +96,10 @@ private const val MAX_GOAL_SHOWN = 14
 
 /** A week's distance shows from a tenth of a km, the first the figure can write. */
 private const val MIN_WEEK_METERS = 100f
+
+/** All badges: three medals to a row, 8 dp apart. */
+private const val ALL_PER_ROW = 3
+private val ALL_GAP = 8.dp
 
 /**
  * The share card for the week from [first]: the count against the goal, its days, the hours, km and active kcal, and
@@ -156,7 +158,9 @@ fun WeeklyGoalSheet(goal: Int, onSave: (Int) -> Unit, onDismiss: () -> Unit) {
 
 /**
  * Goals and bests (board AchievementsV1): this week against the goal with the weeks in a row and the best run, the
- * personal bests, the badges earned with the next one to earn, and the ways on.
+ * personal bests as rosettes, the next badge to earn and how far along, the badges earned as medals, and the ways on.
+ * Each best and badge opens its sheet. Before any workout there's still a page: the week at nought, the bests and
+ * badges there are to go for.
  */
 @Composable
 fun GoalsAndBestsPage(
@@ -169,6 +173,8 @@ fun GoalsAndBestsPage(
     onBack: () -> Unit,
 ) {
     BackHandler(onBack = onBack)
+    var openBadge by rememberSaveable { mutableStateOf<String?>(null) }
+    var openBest by rememberSaveable { mutableStateOf<String?>(null) }
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
         item { PageHeader(stringResource(R.string.glow_goals_title), onBack) }
         if (view == null) {
@@ -182,99 +188,58 @@ fun GoalsAndBestsPage(
                 RewardsCopy.runLine(view.inARow, view.bestRun), bar = true,
             ) { PageButton(stringResource(R.string.glow_goals_goal_button, view.goal), onGoal, icon = AppIcons.PencilEdit) }
         }
-        item {
-            ListPanel(title = stringResource(R.string.glow_goals_personal_bests)) {
-                val shown = view.bests.sortedBy { order(it.kind) }
-                if (shown.isEmpty()) Text(
-                    stringResource(R.string.glow_goals_no_bests), color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
-                    style = GlowType.secondary, modifier = Modifier.padding(vertical = 10.dp),
-                )
-                shown.forEachIndexed { i, b ->
-                    ListRow(
-                        RewardsCopy.bestTitle(b.kind), BestColor, RewardsCopy.bestValue(b.kind, b.value), shortDate(b.date), divider = i > 0,
-                        icon = AppIcons.FlagCheckered,
-                    )
-                }
-            }
-        }
-        item {
-            val earned = view.earned.sortedByDescending { it.earnedAt }.take(5).mapNotNull { r -> Rewards.badge(r.id)?.let { it to shortDate(r.earnedAt) } }
-            val next = view.next?.let { b -> view.progress[b.id]?.let { (have, need) -> b to RewardsCopy.progressLine(have, need, b.unit) } }
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    stringResource(R.string.glow_goals_badges_count, view.earned.size, Rewards.BADGES.size),
-                    color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
-                    modifier = Modifier.padding(start = 4.dp, top = 6.dp),
-                )
-                // The last three earned and the next one, so the row is always four.
-                BadgeRow(earned.take(if (next != null) 3 else 4) + listOfNotNull(next), locked = { b -> view.earned.none { it.id == b.id } }, face = view::face)
-            }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                PageButton(
-                    stringResource(R.string.glow_goals_all_badges), onAllBadges, Modifier.fillMaxWidth(), icon = AppIcons.CheckCircle,
-                )
-                PageButton(stringResource(R.string.glow_goals_last_week), onRecap, Modifier.fillMaxWidth(), icon = AppIcons.CalendarBlank)
-                PageButton(
-                    stringResource(R.string.glow_goals_celebrations), onCelebrations, Modifier.fillMaxWidth(),
-                    icon = AppIcons.SlidersHorizontal,
-                )
-            }
-        }
+        item { BestsPanel(view, onOpen = { openBest = it }) }
+        view.next?.let { next -> item { NextBadgeCard(next, view, onOpen = { openBadge = it.id }) } }
+        item { BadgesPanel(view, onOpen = { openBadge = it.id }, onAllBadges = onAllBadges) }
+        item { WaysOn(onAllBadges, onRecap, onCelebrations) }
+    }
+    if (view != null) {
+        openBadge?.let(Rewards::badge)?.let { b -> BadgeSheet(b, view, onDismiss = { openBadge = null }) }
+        openBest?.let { kind -> BestSheet(kind, view, onDismiss = { openBest = null }) }
     }
 }
 
-/** Bests in a fixed order: runs, then the longest workout, lifts, steps. */
-private fun order(kind: String): Int = Rewards.Kind.fastestMeters(kind)
-    ?: when {
-        kind == Rewards.Kind.LONGEST_RUN -> 100_000
-        kind == Rewards.Kind.LONGEST_WORKOUT -> 100_001
-        Rewards.Kind.liftName(kind) != null -> 100_002
-        else -> 100_003
+/** All badges, last week's recap and the celebration settings, as rows in one panel. */
+@Composable
+private fun WaysOn(onAllBadges: () -> Unit, onRecap: () -> Unit, onCelebrations: () -> Unit) {
+    PageRows {
+        PageRow(stringResource(R.string.glow_goals_all_badges), onClick = onAllBadges, icon = AppIcons.CheckCircle, divider = false)
+        PageRow(stringResource(R.string.glow_goals_last_week), onClick = onRecap, icon = AppIcons.CalendarBlank)
+        PageRow(stringResource(R.string.glow_goals_celebrations), onClick = onCelebrations, icon = AppIcons.SlidersHorizontal)
     }
-
-/** "30 Oct", or "30 Oct 2025" in another year. */
-private fun shortDate(epoch: Long): String {
-    val d = Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).toLocalDate()
-    return if (d.year == LocalDate.now().year) DayWords.dayMonth(d) else DayWords.dayMonthYear(d)
 }
 
-/** Every badge by group: earned ones in colour with their date, locked ones dim with what they need. */
+/**
+ * Every badge by group, three medals to a row with only their names: earned ones lit, locked ones quiet with a bar for
+ * how far along. Each opens its sheet.
+ */
 @Composable
 fun AllBadgesPage(view: RewardsView?, contentPadding: PaddingValues, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
         item {
             val subtitle = view?.let { stringResource(R.string.glow_goals_earned_count, it.earned.size, Rewards.BADGES.size) }
             PageHeader(stringResource(R.string.glow_goals_all_badges), onBack, subtitle = subtitle)
         }
         if (view == null) return@ScreenList
-        val earned = view.earned.associateBy { it.id }
         Rewards.Group.entries.forEach { group ->
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        stringResource(
-                            when (group) {
-                                Rewards.Group.Firsts -> R.string.glow_goals_group_firsts
-                                Rewards.Group.Milestones -> R.string.glow_goals_group_milestones
-                                Rewards.Group.Weekly -> R.string.glow_goals_weekly_goal
-                                Rewards.Group.Kinds -> R.string.glow_goals_group_kinds
-                            },
-                        ),
-                        color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary, modifier = Modifier.padding(start = 4.dp, top = 6.dp),
-                    )
-                    BadgeGrid(
-                        Rewards.BADGES.filter { it.group == group }.map { b ->
-                            b to (earned[b.id]?.let { shortDate(it.earnedAt) } ?: view.progress[b.id]?.let { (have, need) -> RewardsCopy.progressLine(have, need, b.unit) })
-                        },
-                        locked = { it.id !in earned }, face = view::face,
-                    )
+                    SectionLabel(groupName(group), Modifier.padding(top = 6.dp))
+                    QuietPanel {
+                        Rewards.BADGES.filter { it.group == group }.chunked(ALL_PER_ROW).forEach { row ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(ALL_GAP)) {
+                                row.forEach { b -> BadgeCell(b, view, { open = it.id }, GlowType.secondary, Modifier.weight(1f)) }
+                                repeat(ALL_PER_ROW - row.size) { Spacer(Modifier.weight(1f)) }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+    if (view != null) open?.let(Rewards::badge)?.let { b -> BadgeSheet(b, view, onDismiss = { open = null }) }
 }
 
 /**

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import org.openstrap.app.ui.theme.ControlSurface
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
@@ -103,7 +104,7 @@ fun MomentHeader(
                         )
                         Spacer(Modifier.width(8.dp))
                     }
-                    growClick(onOpenStrap).let { g -> StrapChipButton(chip, g.onClick, g.modifier) }
+                    growClick(onOpenStrap).let { g -> StrapPill(chip, g.onClick, g.modifier) }
                 }
             },
         )
@@ -200,37 +201,6 @@ private fun Peek(text: String) {
     Text(text, Modifier.width(PeekWidth), color = Color.White.copy(alpha = 0.22f), style = GlowType.body, maxLines = 1, softWrap = false)
 }
 
-/** The strap chip: a dot, and words only when they matter. */
-@Composable
-private fun StrapChipButton(chip: StrapChip, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val shape = CircleShape
-    Row(
-        modifier.clip(shape).background(ChipSurface).border(1.dp, Color.White.copy(alpha = 0.07f), shape)
-            .clickable(onClickLabel = stringResource(R.string.day_header_open_strap), onClick = onClick)
-            .semantics { contentDescription = chip.description }
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(7.dp).background(chipDotColor(chip.dot), CircleShape))
-        if (chip.text.isNotEmpty()) {
-            Spacer(Modifier.width(7.dp))
-            Text(
-                chip.text, maxLines = 1, softWrap = false,
-                color = if (chip.dot == StrapChip.Dot.Warn) MetricColors.warn else Color.White,
-                style = GlowType.secondary,
-            )
-        }
-    }
-}
-
-private fun chipDotColor(dot: StrapChip.Dot): Color = when (dot) {
-    StrapChip.Dot.Fine -> MetricColors.good
-    StrapChip.Dot.Low -> MetricColors.battery(StrapChip.LOW_BATTERY)
-    StrapChip.Dot.Charging -> MetricColors.good
-    StrapChip.Dot.Warn -> MetricColors.warn
-    StrapChip.Dot.Quiet -> Color.White.copy(alpha = 0.3f)
-}
-
-private val Avatar = Color(0xFF1C1C1E)
-private val ChipSurface = Color(0xFF16161A)
+// The Control surface (spec 2.2): the avatar is a control.
+private val Avatar = ControlSurface
 private val PeekWidth = 34.dp

@@ -42,6 +42,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.coroutineScope
@@ -483,7 +484,13 @@ internal fun PageDots(current: Int, count: Int, position: Float? = null, onSelec
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
         repeat(count) { i ->
             Box(
-                Modifier.size(28.dp).clip(CircleShape).pressClickable({ onSelect(i) }, CircleShape),
+                // 48 dp square to tap, laid out as tall as before so the live screens keep their height: the 10 dp above
+                // and below reach into the bottom bar's 14 dp gaps, never over the controls.
+                Modifier.layout { measurable, constraints ->
+                    val tap = measurable.measure(constraints)
+                    val row = DotsRowHeight.roundToPx()
+                    layout(tap.width, row) { tap.place(0, (row - tap.height) / 2) }
+                }.size(DotTap).clip(CircleShape).pressClickable({ onSelect(i) }, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 val lit = if (position != null) (1f - kotlin.math.abs(position - i)).coerceIn(0f, 1f) else if (i == current) 1f else 0f
@@ -492,6 +499,10 @@ internal fun PageDots(current: Int, count: Int, position: Float? = null, onSelec
         }
     }
 }
+
+/** A page dot's tap target, and the height the dots' row takes in the bottom bar. */
+private val DotTap = 48.dp
+private val DotsRowHeight = 28.dp
 
 @Composable
 internal fun LiveStat(label: String, modifier: Modifier = Modifier, value: @Composable () -> Unit) {

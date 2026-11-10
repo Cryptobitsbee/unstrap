@@ -60,7 +60,7 @@ class FrameTest {
         assertEquals(StrapChip.Dot.Charging, strapChip(true, connected(64, charging = true), SyncState.Idle, null, now).dot)
         val failed = strapChip(true, connected(), SyncState.Failed("timeout"), now, now)
         assertEquals("Not synced", failed.text)
-        assertEquals(StrapChip.Dot.Warn, failed.dot)
+        assertEquals(StrapChip.Dot.Unsynced, failed.dot)
         assertEquals("Not paired", strapChip(false, ConnectionState.NotPaired, SyncState.Idle, null, now).text)
         assertEquals("Not paired", strapChip(true, ConnectionState.NotPaired, SyncState.Idle, null, now).text)
     }

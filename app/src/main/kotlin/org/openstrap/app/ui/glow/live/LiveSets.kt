@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -531,7 +532,9 @@ private fun ExerciseSheet(current: String?, used: List<String>, onPick: (String?
                     }
                     if (typed.isNotBlank()) Icon(
                         AppIcons.Tick02, stringResource(R.string.workout_live_exercise_use), tint = Color.White,
-                        modifier = Modifier.size(28.dp).clip(CircleShape).pressClickable({ onPick(typed) }, CircleShape).padding(4.dp),
+                        // 48 dp to tap, the mark drawn 20 dp as before, and moved out so it stays where it was.
+                        modifier = Modifier.offset(x = 10.dp).size(48.dp).clip(CircleShape)
+                            .pressClickable({ onPick(typed) }, CircleShape).padding(14.dp),
                     )
                 }
             },

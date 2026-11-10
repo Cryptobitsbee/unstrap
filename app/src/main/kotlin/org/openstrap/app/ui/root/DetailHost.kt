@@ -85,6 +85,7 @@ internal fun DetailHost(
             contentPadding = padding, onBack = pop,
             workouts = workouts, activity = activity, onEditProfile = onOpenProfile,
             sleepEditing = SleepEditing(dayVm::setSleepTimes, dayVm::deleteSleep, dayVm::restoreSleep),
+            recoveryFailure = shown.recoveryFailure,
         )
         Detail.Week -> WeekDetail(
             ActivityDetailContext(
