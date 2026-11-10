@@ -52,6 +52,8 @@ class AppContainer(val app: Application) {
         app, database.healthDao(), settings, strap, maxHeartRates, callRinging = { phoneAlerts.callRinging }, onSaved = autoHealthConnect::workoutSaved,
         scope = appScope,
     )
+    /** Saved and the Keep recording notice, from the session's state, on the app scope (audit S10). */
+    val workoutNotifier = org.openstrap.app.device.WorkoutNotifier(app, workout.state, { database.healthDao().appWorkoutOnce(it) }, appScope)
     val updater = org.openstrap.app.update.AppUpdater(
         app, settings, recording = { workout.state.value is org.openstrap.app.device.WorkoutState.Recording }, scope = appScope,
     )
@@ -112,6 +114,7 @@ class OpenStrapApp : Application(), androidx.work.Configuration.Provider {
         container.companion.refresh()
         // A workout still recording when the process died carries on (the service restarts it too).
         container.workout.restore()
+        container.workoutNotifier.start()
         // Android restarts the process on its own (companion presence, a reboot): reconnect without the screen.
         // A no-op when nothing is paired, a connection is already up, or the user tapped Disconnect.
         if (BlePermissions.granted(this)) container.strap.backgroundConnect()

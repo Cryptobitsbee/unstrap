@@ -73,7 +73,37 @@ object KeepRecordingNotice {
         context.getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
     }
 
+    /**
+     * Set while the service's own refusal is what the notice shows. The session clears the notice when its start call
+     * returns without throwing, which only says the start was queued: that clear can land after the service's refusal
+     * and cancel the one notice meant for it (audit S10), so [clear] leaves it alone then.
+     */
+    @Volatile private var refusedByService = false
+
+    /** The service was refused its foreground: asks for the tap, and holds the notice against [clear]. */
+    fun serviceRefused(context: Context, sportType: Int) {
+        refusedByService = true
+        show(context, sportType)
+    }
+
+    /** The service is in the foreground: the notice isn't needed. */
+    fun serviceUp(context: Context) {
+        refusedByService = false
+        cancel(context)
+    }
+
+    /** A start went through or a workout stopped: goes, unless the service itself was refused ([serviceRefused]). */
     fun clear(context: Context) {
+        if (!refusedByService) cancel(context)
+    }
+
+    /** Nothing records any more: goes in every case. [WorkoutNotifier] calls it as the session's state leaves Recording. */
+    fun end(context: Context) {
+        refusedByService = false
+        cancel(context)
+    }
+
+    private fun cancel(context: Context) {
         context.getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
     }
 }

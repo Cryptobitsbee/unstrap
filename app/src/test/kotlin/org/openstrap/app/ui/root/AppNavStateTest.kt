@@ -131,6 +131,19 @@ class AppNavStateTest {
     }
 
     @Test
+    fun `a session in progress closes Ready and Choose however it started`() {
+        val nav = AppNavState()
+        nav.openChoose()
+        nav.openReady(5)
+        nav.sessionInProgress()
+        assertEquals(WorkoutOverlay.None, nav.workout)
+        // A request opening Ready during the summary is closed again by the same effect.
+        nav.apply(NavRequest.OpenReady(4), recording = false, firmwareInstalling = false)
+        nav.sessionInProgress()
+        assertEquals(WorkoutOverlay.None, nav.workout)
+    }
+
+    @Test
     fun `an update installing keeps its pages open`() {
         val nav = AppNavState(AppNavState.Snapshot(pages = listOf(Page.Strap, Page.Firmware)))
         assertFalse(nav.closePages(firmwareInstalling = true))

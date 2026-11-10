@@ -264,6 +264,14 @@ class AppNavState(initial: Snapshot = Snapshot()) {
         workout = WorkoutOverlay.None
     }
 
+    /**
+     * The session left Idle, however it started (the app, the tile, the strap): Ready and Choose close, so neither
+     * comes back after the summary. Also closes one a request opened while the summary showed.
+     */
+    fun sessionInProgress() {
+        if (workout != WorkoutOverlay.None) workout = WorkoutOverlay.None
+    }
+
     /** Your zones, over Ready. */
     fun openZones() {
         (workout as? WorkoutOverlay.Ready)?.let { workout = it.copy(zones = true) }
