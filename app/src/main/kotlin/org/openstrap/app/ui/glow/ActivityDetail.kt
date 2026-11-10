@@ -92,6 +92,8 @@ internal class ActivityDetailContext(
     val onEditProfile: () -> Unit,
     val contentPadding: PaddingValues,
     val onBack: () -> Unit,
+    /** The day picked, which the strip shows at once while [state] and [r] may still be the last day's. */
+    val stripDate: LocalDate = state.date,
 ) {
     val today: LocalDate get() = LocalDate.now()
     val isToday: Boolean get() = state.date == today
@@ -121,9 +123,9 @@ private fun weekOf(end: LocalDate): List<LocalDate> = (6 downTo 0).map { end.min
 /** The strip under the value, with a dot under days that have steps. */
 @Composable
 private fun stepsStrip(ctx: ActivityDetailContext, metric: DailyMetric = DailyMetric.Steps): List<DetailCopy.StripDay> {
-    val strip = DetailCopy.strip(ctx.state.date, ctx.today, emptySet())
+    val strip = DetailCopy.strip(ctx.stripDate, ctx.today, emptySet())
     val withData = daysWithData(metric, strip.first().date.minusDays(1), strip.last().date, ctx.history)
-    return DetailCopy.strip(ctx.state.date, ctx.today, withData)
+    return DetailCopy.strip(ctx.stripDate, ctx.today, withData)
 }
 
 /* -------------------------------------------- Heart points ------------------------------------------ */
@@ -161,7 +163,9 @@ private fun HeartPointsDetail(ctx: ActivityDetailContext) {
             DetailHeadline(total.toString(), stringResource(R.string.glow_activity_points_last_7_days), ActivityCopy.heartPointsWord(total))
         else -> DetailHeadline.none(stringResource(R.string.glow_activity_no_points_yet), AFTER_NEXT_SYNC)
     }
-    val strip = DetailCopy.strip(date, ctx.today, stored.keys)
+    // A dot only under a day the strap recorded points for: read for the whole strip, so it doesn't change with the day
+    // shown, and not for a day it wasn't worn.
+    val strip = DetailCopy.strip(date, ctx.today, ctx.activity.heartPointsDays)
 
     DetailTemplate(
         Score.HeartPoints.title, color, siblings(Detail.OfScore(Score.HeartPoints), ctx.onSwitch), onInfo = { info = true }, onBack = ctx.onBack,
@@ -270,6 +274,8 @@ private fun ActiveMinutesDetail(ctx: ActivityDetailContext) {
         Score.ActiveMinutes.title, color, siblings(Detail.OfScore(Score.ActiveMinutes), ctx.onSwitch), onInfo = { info = true }, onBack = ctx.onBack,
         contentPadding = ctx.contentPadding, headline = headline, strip = stepsStrip(ctx), onDay = ctx.onSelectDay,
         ranges = ranges, range = range, onRange = { rangeIndex = ranges.indexOf(it) }, scrubbed = { scrub },
+        // The figures are the held day's ([ActivityDetailContext.stripDate]), so they move when it does.
+        headlineDay = date,
         // The card's picture: the week's minutes as blocks toward the 150 to aim for. It's the week's number the card
         // shows, so the blocks belong to Week, over the days that make them.
         heroPicture = if (a != null && range == Range.Week) {
@@ -364,6 +370,8 @@ private fun LoadDetail(ctx: ActivityDetailContext) {
         Score.Load.title, color, siblings(Detail.OfScore(Score.Load), ctx.onSwitch), onInfo = { info = true }, onBack = ctx.onBack,
         contentPadding = ctx.contentPadding, headline = headline, strip = stepsStrip(ctx, DailyMetric.HeartRate), onDay = ctx.onSelectDay,
         ranges = ranges, range = range, onRange = { rangeIndex = ranges.indexOf(it) }, scrubbed = { scrub },
+        // The figures are the held day's ([ActivityDetailContext.stripDate]), so they move when it does.
+        headlineDay = ctx.state.date,
         // The Load card's picture: today's Load filling over your usual band, as on Today and Activity.
         heroPicture = if (r != null && range == Range.Day) {
             { DetailPicture(height = 40.dp) { m -> LevelFill(r.load, band, color, PictureSize.Wide, m) } }

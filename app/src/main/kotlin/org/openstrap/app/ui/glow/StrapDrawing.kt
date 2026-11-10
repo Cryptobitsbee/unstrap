@@ -24,16 +24,23 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 
 /*
- * The strap as a line drawing, shared by the Strap page's card and Today's pairing stage.
+ * The strap as a line drawing, shared by the Strap page's card, Today's pairing stage and the header's strap pill.
  */
 
 /**
  * The strap seen from the front, drawn in line: the band running off the top and bottom with a faint weave, the pod as
  * a rectangle a little wider than the band with its bevel, one highlight and the lugs, and its light in [led]. While it
  * syncs, an arc turns round the light. When it isn't connected the drawing dims and the light goes out to a ring.
+ * [lineScale] thickens every line, for a drawing too small for the hairlines of the card's.
  */
 @Composable
-internal fun StrapDrawing(led: Color, lit: Boolean, syncing: Boolean, modifier: Modifier) {
+internal fun StrapDrawing(
+    led: Color,
+    lit: Boolean,
+    syncing: Boolean,
+    modifier: Modifier,
+    lineScale: Float = 1f,
+) {
     // The turn is a State read only in draw, so a syncing strap redraws each frame without recomposing.
     val turn: State<Float> = if (syncing) {
         val t = rememberInfiniteTransition(label = "strap sync")
@@ -46,6 +53,8 @@ internal fun StrapDrawing(led: Color, lit: Boolean, syncing: Boolean, modifier: 
         modifier.graphicsLayer { alpha = if (lit) 1f else 0.45f }.drawWithCache {
             // Drawn on a 120 by 150 grid, the card slot's shape.
             val k = size.width / 120f
+            // Line widths, which [lineScale] thickens; positions stay on the grid.
+            val s = k * lineScale
             fun o(x: Float, y: Float) = Offset(x * k, y * k)
             val white = Color.White
             val edge = Brush.verticalGradient(
@@ -67,23 +76,23 @@ internal fun StrapDrawing(led: Color, lit: Boolean, syncing: Boolean, modifier: 
                     for (x in WeaveOdd) drawLine(white.copy(alpha = 0.09f), o(x, y + 1.5f), o(x + 3f, y + 1.5f), k, StrokeCap.Round)
                     for (x in WeaveEven) drawLine(white.copy(alpha = 0.09f), o(x, y + 4.5f), o(x + 3f, y + 4.5f), k, StrokeCap.Round)
                 }
-                drawLine(edge, o(43f, 0f), o(43f, 150f), 1.4f * k)
-                drawLine(edge, o(77f, 0f), o(77f, 150f), 1.4f * k)
+                drawLine(edge, o(43f, 0f), o(43f, 150f), 1.4f * s)
+                drawLine(edge, o(77f, 0f), o(77f, 150f), 1.4f * s)
                 // The lugs, where the band meets the pod.
-                for ((x, y) in Lugs) drawLine(white.copy(alpha = 0.5f), o(x, y), o(x, y + 4f), 1.2f * k, StrokeCap.Round)
+                for ((x, y) in Lugs) drawLine(white.copy(alpha = 0.5f), o(x, y), o(x, y + 4f), 1.2f * s, StrokeCap.Round)
                 // The pod, its bevel and one highlight on the top left.
                 drawRoundRect(Color(0xFF0C0F0E), o(34f, 40f), Size(52f * k, 70f * k), CornerRadius(9f * k))
-                drawRoundRect(white.copy(alpha = 0.8f), o(34f, 40f), Size(52f * k, 70f * k), CornerRadius(9f * k), style = Stroke(1.5f * k))
-                drawRoundRect(white.copy(alpha = 0.2f), o(39f, 45f), Size(42f * k, 60f * k), CornerRadius(5f * k), style = Stroke(k))
-                drawPath(highlight, white.copy(alpha = 0.45f), style = Stroke(1.2f * k, cap = StrokeCap.Round))
+                drawRoundRect(white.copy(alpha = 0.8f), o(34f, 40f), Size(52f * k, 70f * k), CornerRadius(9f * k), style = Stroke(1.5f * s))
+                drawRoundRect(white.copy(alpha = 0.2f), o(39f, 45f), Size(42f * k, 60f * k), CornerRadius(5f * k), style = Stroke(s))
+                drawPath(highlight, white.copy(alpha = 0.45f), style = Stroke(1.2f * s, cap = StrokeCap.Round))
                 // The light.
                 if (lit) {
                     drawCircle(glow, 14f * k, c)
                     drawCircle(led, 3.2f * k, c)
                     if (syncing) rotate(turn.value, c) {
-                        drawArc(led, -90f, 75f, false, o(49f, 64f), Size(22f * k, 22f * k), style = Stroke(1.4f * k, cap = StrokeCap.Round))
+                        drawArc(led, -90f, 75f, false, o(49f, 64f), Size(22f * k, 22f * k), style = Stroke(1.4f * s, cap = StrokeCap.Round))
                     }
-                } else drawCircle(white.copy(alpha = 0.6f), 3.2f * k, c, style = Stroke(k))
+                } else drawCircle(white.copy(alpha = 0.6f), 3.2f * k, c, style = Stroke(s))
             }
         },
     )

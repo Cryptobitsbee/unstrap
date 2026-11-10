@@ -205,6 +205,10 @@ object RewardsCopy {
         return strings.format(part, t.format(Formatters.of("EEEE, d MMMM yyyy", locale)), sportName.lowercase(locale))
     }
 
+    /** "Thursday, 30 October 2026": the day a badge was earned, or a best set by a day rather than a workout. */
+    fun dayLong(date: Long, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String =
+        Instant.ofEpochSecond(date).atZone(zone).format(Formatters.of("EEEE, d MMMM yyyy", locale))
+
     /** "27 October to 2 November": a week from its first day. */
     fun weekRange(first: LocalDate, locale: Locale = Locale.getDefault()): String {
         val f = Formatters.of("d MMMM", locale)

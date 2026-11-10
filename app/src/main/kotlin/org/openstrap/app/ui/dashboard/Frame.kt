@@ -40,7 +40,7 @@ fun peekDay(date: LocalDate, locale: Locale = Locale.getDefault()): String =
  * What the strap chip in the header shows: a [dot] and, only when they matter, a few words ([text] may be empty).
  * [description] is read out by a screen reader.
  */
-data class StrapChip(val text: String, val dot: Dot, val description: String) {
+data class StrapChip(val text: String, val dot: Dot, val description: String, val battery: Int? = null) {
     enum class Dot {
         /** Connected and all is well. */
         Fine,
@@ -51,7 +51,10 @@ data class StrapChip(val text: String, val dot: Dot, val description: String) {
         /** Connected and charging. */
         Charging,
 
-        /** Something needs a look: not synced, or not seen for a while. Amber. */
+        /** The strap is there but its last sync failed. Orange. */
+        Unsynced,
+
+        /** The strap isn't connected: not seen for a while. Shown as the strap, broken. */
         Warn,
 
         /** Nothing to report yet (connecting), or nothing paired. Dim. */
@@ -106,19 +109,20 @@ fun strapChip(
             when {
                 connection.charging && battery != null -> StrapChip(
                     strings.format(R.string.day_chip_charging, battery), StrapChip.Dot.Charging,
-                    strings.plural(R.plurals.day_chip_charging_description, battery, battery),
+                    strings.plural(R.plurals.day_chip_charging_description, battery, battery), battery,
                 )
                 sync is SyncState.Failed -> StrapChip(
-                    strings.get(R.string.day_chip_not_synced), StrapChip.Dot.Warn, strings.get(R.string.day_chip_not_synced_description),
+                    strings.get(R.string.day_chip_not_synced), StrapChip.Dot.Unsynced,
+                    strings.get(R.string.day_chip_not_synced_description),
                 )
                 battery == null -> StrapChip("", StrapChip.Dot.Fine, strings.get(R.string.day_chip_connected_description))
                 StrapBands.lowBattery(battery, connection.charging) -> StrapChip(
                     strings.format(R.string.day_chip_battery, battery), StrapChip.Dot.Low,
-                    strings.plural(R.plurals.day_chip_battery_low_description, battery, battery),
+                    strings.plural(R.plurals.day_chip_battery_low_description, battery, battery), battery,
                 )
                 else -> StrapChip(
                     strings.format(R.string.day_chip_battery, battery), StrapChip.Dot.Fine,
-                    strings.plural(R.plurals.day_chip_battery_description, battery, battery),
+                    strings.plural(R.plurals.day_chip_battery_description, battery, battery), battery,
                 )
             }
         }

@@ -5,7 +5,25 @@ import org.openstrap.app.presentation.TimeOfDay
 import org.openstrap.app.presentation.DayWords
 import org.openstrap.app.presentation.Units
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.abs
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.runtime.LaunchedEffect
+import org.openstrap.app.ui.components.Motion
+import org.openstrap.app.ui.components.rememberAnimationsOn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,6 +142,8 @@ internal fun siblings(detail: Detail, onSwitch: (Detail) -> Unit): List<DetailSi
  * Recovery arc, the Sleep horizon), centred with its label and status word under it; [heroPicture] is the card's picture under the value, above the days; [heroSide] sits to the right of
  * a plain value row (heart rate's Live switch). While a chart is scrubbed, [scrubbed] gives the reading under the
  * finger in the headline's place, on the value row in the gauge's place. It's read only inside the hero.
+ * [headlineDay] is the day the [headline] is for, when that isn't the strip's: a page that holds the last day's
+ * figures while the next is worked out ([DayNumber]).
  */
 @Composable
 internal fun DetailTemplate(
@@ -143,6 +163,7 @@ internal fun DetailTemplate(
     heroSide: (@Composable () -> Unit)? = null,
     heroPicture: (@Composable () -> Unit)? = null,
     scrubbed: () -> DetailHeadline? = { null },
+    headlineDay: LocalDate? = strip.firstOrNull { it.selected }?.date,
     body: LazyListScope.() -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -180,11 +201,12 @@ internal fun DetailTemplate(
                                         style = GlowType.pageTitle,
                                     )
                                     Text(
-                                        shown.label, color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
+                                        shown.label, color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
+                                        style = GlowType.secondary,
                                     )
                                 }
                                 else -> Row(verticalAlignment = Alignment.Bottom) {
-                                    DotMatrixText(shown.value, Modifier.detailNumber(shown.value), dot = DotSize.Detail)
+                                    DayNumber(shown.value, headlineDay, Modifier.detailNumber(shown.value))
                                     Text(
                                         shown.label, color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
                                         style = GlowType.secondary, modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
@@ -204,13 +226,128 @@ internal fun DetailTemplate(
             }
             if (ranges.size > 1) item {
                 GlowSegments(
-                    ranges.map { it.label }, ranges.indexOf(range), { onRange(ranges[it]) }, Modifier.padding(top = 6.dp), role = Role.Tab,
+                    ranges.map { it.label }, ranges.indexOf(range), { onRange(ranges[it]) }, Modifier.padding(top = 6.dp),
+                    role = Role.Tab,
                 )
             }
             body()
         }
     }
     if (switching) SwitcherSheet(siblings, color, onDismiss = { switching = false })
+}
+
+/**
+ * The hero's figure in dots, moving to the next day's rather than cutting. A figure that is a plain number counts from
+ * the one shown to the new one, and when the two are close (a few points, which a count would only step through) it
+ * rolls instead, the old one sliding out as the new one slides in. Never from zero, and not with the system's
+ * animations off.
+ *
+ * [day] is the day [value] is for, which on a page that holds the last day's figures while the next day is worked out
+ * (Energy, Load) is the held day, not the one just picked: the figure and its day arrive together, however late. Only
+ * a change that comes with another day moves; a scrub or a live reading lands at once, and so does the first change on
+ * a day whose figure came in the same as the last day's.
+ */
+@Composable
+internal fun DayNumber(value: String, day: LocalDate?, modifier: Modifier = Modifier) {
+    val animate = rememberAnimationsOn()
+    val parsed = remember(value) { PlainNumber.parse(value) }
+    val count = remember { Animatable(parsed?.number ?: 0f) }
+    val shown = remember { Shown(value, day, parsed?.number) }
+    val moving = day != shown.day && value != shown.text
+    val from = if (count.isRunning) count.value else shown.number
+    val to = parsed?.number
+    val step = stepOf(animate && moving, from, to)
+    SideEffect {
+        shown.text = value
+        shown.day = day
+        shown.number = to
+        if (step == Step.Count) shown.countFrom = from
+    }
+    LaunchedEffect(value, day) {
+        if (to == null) return@LaunchedEffect
+        if (step == Step.Count && from != null) {
+            count.snapTo(from)
+            count.animateTo(to, tween(COUNT_MS, easing = Motion.easing))
+        } else {
+            count.snapTo(to)
+        }
+        shown.countFrom = null
+    }
+    val up = (to ?: 0f) > (from ?: 0f)
+    AnimatedContent(
+        targetState = value, modifier = modifier, label = "day number",
+        transitionSpec = {
+            if (step == Step.Roll) roll(up) else ContentTransform(EnterTransition.None, ExitTransition.None, sizeTransform = null)
+        },
+    ) { text -> DotMatrixText(countedText(text, value, parsed, count, step, from, shown.countFrom), dot = DotSize.Detail) }
+}
+
+/**
+ * What the figure reads this frame: the count while it runs. Until it starts, its starting figure, so the new day's
+ * number never shows for a frame before the count runs back up to it (2,500 to 4,500 read 4, then 2, then 4).
+ */
+private fun countedText(
+    text: String, value: String, parsed: PlainNumber?, count: Animatable<Float, *>, step: Step, from: Float?, waiting: Float?,
+): String {
+    if (parsed == null || text != value) return text
+    val at = when {
+        count.isRunning -> count.value
+        step == Step.Count -> from
+        else -> waiting
+    }
+    return at?.let(parsed::write) ?: text
+}
+
+/** How a figure gets to the next day's: at once, counting through the numbers between, or rolling when they're close. */
+private enum class Step { Land, Count, Roll }
+
+private fun stepOf(moving: Boolean, from: Float?, to: Float?): Step = when {
+    !moving || from == null || to == null -> Step.Land
+    abs(to - from) < ROLL_BELOW -> Step.Roll
+    else -> Step.Count
+}
+
+/** The figure last shown, the day it was for, and the figure a count starts from while it waits to run. */
+private class Shown(var text: String, var day: LocalDate?, var number: Float?, var countFrom: Float? = null)
+
+/** The old figure slides out one way and the new one in from the other, up for a higher one, with a fade. */
+private fun roll(up: Boolean): ContentTransform {
+    val slide = tween<IntOffset>(ROLL_MS, easing = Motion.easing)
+    val fade = tween<Float>(ROLL_MS, easing = Motion.easing)
+    val sign = if (up) 1 else -1
+    return ContentTransform(
+        slideInVertically(slide) { sign * it / ROLL_TRAVEL } + fadeIn(fade),
+        slideOutVertically(slide) { -sign * it / ROLL_TRAVEL } + fadeOut(fade),
+        sizeTransform = SizeTransform(clip = false),
+    )
+}
+
+/** How long a figure takes to count to the next day's, and to roll; and a change under [ROLL_BELOW] rolls. */
+private const val COUNT_MS = 600
+private const val ROLL_MS = 320
+private const val ROLL_BELOW = 25f
+
+/** A roll travels a third of the figure's height. */
+private const val ROLL_TRAVEL = 3
+
+/** A figure written as a plain number ("72", "8,432", "14.6"): its value, and how to write another like it. */
+private class PlainNumber(val number: Float, decimals: Int, grouped: Boolean) {
+    /** Made once, not on every frame of a count. Only the composition writes with it, on the main thread. */
+    private val format = java.text.NumberFormat.getNumberInstance(Units.DOT_LOCALE).apply {
+        minimumFractionDigits = decimals
+        maximumFractionDigits = decimals
+        isGroupingUsed = grouped
+    }
+
+    fun write(n: Float): String = format.format(n.toDouble())
+
+    companion object {
+        private val SHAPE = Regex("""^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$""")
+
+        fun parse(text: String): PlainNumber? =
+            if (!SHAPE.matches(text)) null
+            else PlainNumber(text.replace(",", "").toFloat(), text.substringAfter('.', "").length, ',' in text)
+    }
 }
 
 /** The hero's tint: the metric's colour at the top fading to black, rounded at the foot, as wide as the screen. */
@@ -269,16 +406,23 @@ private fun WeekStrip(days: List<DetailCopy.StripDay>, color: Color, onDay: (Loc
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         days.forEach { d ->
             val show = stringResource(R.string.glow_metrics_show_day, d.label)
+            // The pill moves to the day tapped, and its dot comes and goes, rather than cutting.
+            val quick = tween<Color>(Motion.QUICK)
+            val pill by animateColorAsState(
+                if (d.selected) Color.White.copy(alpha = 0.10f) else Color.Transparent, quick, label = "day pill",
+            )
+            val ink by animateColorAsState(if (d.selected) Color.White else Color.White.copy(alpha = 0.5f), quick, label = "day ink")
+            val dot by animateColorAsState(if (d.hasData) color else Color.Transparent, quick, label = "day dot")
             Column(
                 Modifier.width(40.dp).clip(RoundedCornerShape(14.dp))
-                    .background(if (d.selected) Color.White.copy(alpha = 0.10f) else Color.Transparent)
+                    .background(pill)
                     .clickable(onClickLabel = show, role = Role.Button) { onDay(d.date) }
                     .padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                Text(d.label, color = if (d.selected) Color.White else Color.White.copy(alpha = 0.5f), style = GlowType.secondary, maxLines = 1)
-                Box(Modifier.size(5.dp).background(if (d.hasData) color else Color.Transparent, CircleShape))
+                Text(d.label, color = ink, style = GlowType.secondary, maxLines = 1)
+                Box(Modifier.size(5.dp).background(dot, CircleShape))
             }
         }
     }
