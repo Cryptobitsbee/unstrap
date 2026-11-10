@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
@@ -88,7 +89,10 @@ internal fun StrapPill(chip: StrapChip, onClick: () -> Unit, modifier: Modifier 
     val fill by animateFloatAsState(fillOf(chip), tween(FILL_MS, easing = Motion.easing), label = "strap fill")
     val flow = rememberChargeFlow(chip.dot == StrapChip.Dot.Charging)
     Row(
-        modifier.clip(CircleShape).background(ControlSurface)
+        // 48 dp tall to tap, the pill drawn 32 dp tall in the middle of it; the header row is 60 dp, so nothing moves.
+        // [modifier] comes after, so the Strap page grows out of the pill as drawn, not the room round it.
+        Modifier.minimumInteractiveComponentSize().then(modifier)
+            .clip(CircleShape).background(ControlSurface)
             // Read where it is drawn, so the fill and its flow redraw without composing the pill again.
             .drawBehind { if (tint != null) drawFill(tint, fill, flow.value) }
             .border(1.dp, Color.White.copy(alpha = 0.07f), CircleShape)
