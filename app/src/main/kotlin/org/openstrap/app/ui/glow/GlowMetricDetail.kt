@@ -331,12 +331,15 @@ private const val ROLL_BELOW = 25f
 private const val ROLL_TRAVEL = 3
 
 /** A figure written as a plain number ("72", "8,432", "14.6"): its value, and how to write another like it. */
-private class PlainNumber(val number: Float, private val decimals: Int, private val grouped: Boolean) {
-    fun write(n: Float): String = java.text.NumberFormat.getNumberInstance(Units.DOT_LOCALE).apply {
+private class PlainNumber(val number: Float, decimals: Int, grouped: Boolean) {
+    /** Made once, not on every frame of a count. Only the composition writes with it, on the main thread. */
+    private val format = java.text.NumberFormat.getNumberInstance(Units.DOT_LOCALE).apply {
         minimumFractionDigits = decimals
         maximumFractionDigits = decimals
         isGroupingUsed = grouped
-    }.format(n.toDouble())
+    }
+
+    fun write(n: Float): String = format.format(n.toDouble())
 
     companion object {
         private val SHAPE = Regex("""^(\d{1,3}(,\d{3})+|\d+)(\.\d+)?$""")
