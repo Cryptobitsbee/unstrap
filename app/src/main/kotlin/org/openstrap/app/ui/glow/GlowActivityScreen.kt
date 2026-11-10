@@ -169,7 +169,7 @@ fun GlowActivityScreen(
     }
     val stored = activity.heartPointsOn(state.date)
     val heartPoints = state.pai?.total ?: stored[state.date]?.total
-    val r = recovery?.takeIf { it.date == state.date }
+    val r = recovery
     val live = liveHeartRate?.takeIf { isToday }
     org.openstrap.app.ui.components.HoldLiveHeartRate(isToday)
     val slots = activityCards(ActivityFacts(isToday = isToday, suggestion = suggestion != null, live = live != null))

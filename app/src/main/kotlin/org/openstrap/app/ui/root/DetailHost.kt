@@ -72,7 +72,7 @@ internal fun DetailHost(
     val push: (Detail) -> Unit = { nav.push(tab, it) }
     val onSwitch: (Detail) -> Unit = { nav.replaceTop(tab, it) }
     val workouts by workoutsVm.workouts.collectAsStateWithLifecycle()
-    val activity by dayVm.activityHistory.collectAsStateWithLifecycle()
+    val activity = shown.activity
     when (detail) {
         // A night signal's detail is always the night's, as its rows read it (SleepCopy.NIGHT_SIGNALS).
         is Detail.OfMetric -> GlowMetricDetailScreen(
@@ -88,7 +88,7 @@ internal fun DetailHost(
         )
         Detail.Week -> WeekDetail(
             ActivityDetailContext(
-                day, shown.recovery?.takeIf { it.date == day.date }, workouts, activity, histories.daily, onOpen = push, onSwitch = {},
+                day, shown.recovery, workouts, activity, histories.daily, onOpen = push, onSwitch = {},
                 onSelectDay = dayVm::select, onEditProfile = onOpenProfile, contentPadding = padding, onBack = pop,
             ),
         )

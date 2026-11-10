@@ -129,7 +129,7 @@ class AppRootViewModelTest {
         assertEquals(4, await(vm.dayExtras) { it.checkIn != null }.checkIn)
         val next = day.plusDays(1)
         vm.dayShown(next)
-        assertEquals(DayExtras(), await(vm.dayExtras) { it.checkIn == null })
+        assertEquals(DayExtras(next), await(vm.dayExtras) { it.date == next && it.checkIn == null })
     }
 
     @Test fun `the strap facts follow the connection`() {
