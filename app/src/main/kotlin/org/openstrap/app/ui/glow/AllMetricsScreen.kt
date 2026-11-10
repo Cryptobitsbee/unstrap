@@ -99,7 +99,7 @@ fun metricIndex(
     strapScore: Int? = null,
     strings: Strings = Strings.app,
 ): List<IndexGroup> {
-    val rec = recovery?.takeIf { it.date == state.date }
+    val rec = recovery
     val (habitValue, habitStatus) = habitAgeRow(healthspan, strings)
     val weekFrom = state.date.minusDays(6)
     // The 7 days up to the day shown, not Your week's Monday to Sunday, so the row says so. The strap's own

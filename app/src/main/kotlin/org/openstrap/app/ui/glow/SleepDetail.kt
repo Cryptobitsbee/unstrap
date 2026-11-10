@@ -173,6 +173,8 @@ internal fun SleepScoreDetail(
         score != null -> DetailHeadline(score.toString(), SleepCopy.scoreLabel(isToday), TabCopy.sleepScoreWord(score))
         session == null && state.deletedSleep != null ->
             DetailHeadline.none(stringResource(R.string.glow_sleep_no_score), SleepCopy.noScoreDeleted(isToday))
+        // The day's rows haven't arrived: nothing yet, not "No score".
+        !state.loaded -> DetailHeadline.none("", "")
         else -> SleepCopy.noScore(session != null, isToday).let { (word, why) -> DetailHeadline.none(word, why) }
     }
 
@@ -194,7 +196,8 @@ internal fun SleepScoreDetail(
                 if (session == null && deleted != null) {
                     item { DeletedNight(SleepCopy.deletedNight(clock(deleted.start), clock(deleted.end), isToday)) { editing.restore(deleted.strap) } }
                 } else if (session == null) {
-                    item { DetailEmpty(TabCopy.noNight(state.naps.isNotEmpty(), isToday)) }
+                    // Not before the day has loaded: an empty state isn't "No night".
+                    if (state.loaded) item { DetailEmpty(TabCopy.noNight(state.naps.isNotEmpty(), isToday)) }
                 } else {
                     val asleep = state.asleepSeconds ?: (session.end - session.start)
                     val detected = state.sleepAsDetected

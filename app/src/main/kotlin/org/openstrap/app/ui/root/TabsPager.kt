@@ -45,6 +45,7 @@ import org.openstrap.app.ui.components.sinkBehind
 import org.openstrap.app.ui.dashboard.DailyHistory
 import org.openstrap.app.ui.dashboard.DayPicker
 import org.openstrap.app.ui.dashboard.DayUiState
+import org.openstrap.app.ui.dashboard.ActivityHistory
 import org.openstrap.app.ui.dashboard.DayViewModel
 import org.openstrap.app.ui.dashboard.Detail
 import org.openstrap.app.ui.dashboard.LocalScrollToTop
@@ -94,9 +95,15 @@ class ShownDay(
     val wear: Wear?,
     /** The first real score shows its moment (E4). */
     val firstScore: Boolean,
+    /** The day's rows haven't arrived yet: the screens show their placeholders, never another day's numbers. */
+    val loading: Boolean = false,
+    /** Your usual steps by hour for the day shown, null until there are enough worn days. */
+    val usualSteps: List<Float>? = null,
+    /** Heart points, calories and steps up to the day shown. */
+    val activity: ActivityHistory = ActivityHistory(),
 ) {
     /** The strap's own score for the day shown's night, by the strap session it came from ([RecoveryResult.strapScore]). */
-    val strapScore: Int? get() = recovery?.takeIf { it.date == day.date }?.strapScore
+    val strapScore: Int? get() = recovery?.strapScore
 }
 
 /** The stored histories the charts read. */
@@ -241,8 +248,8 @@ private fun TabRoot(
 ) {
     val day = shown.day
     val workouts by workoutsVm.workouts.collectAsStateWithLifecycle()
-    val usualSteps by dayVm.usualSteps.collectAsStateWithLifecycle()
-    val activity by dayVm.activityHistory.collectAsStateWithLifecycle()
+    val usualSteps = shown.usualSteps
+    val activity = shown.activity
     val suggestions by workoutsVm.suggestions.collectAsStateWithLifecycle()
     // Hidden while a workout records: the strap's history may show the one under way.
     val suggestion = suggestions.firstOrNull().takeIf { today.running == null }
