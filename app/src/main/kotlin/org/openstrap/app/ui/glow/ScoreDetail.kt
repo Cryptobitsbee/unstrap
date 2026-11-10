@@ -38,6 +38,7 @@ import org.openstrap.app.ui.dashboard.InfoCopy
 import org.openstrap.app.presentation.Metric
 import org.openstrap.app.ui.dashboard.Narrative
 import org.openstrap.app.presentation.Range
+import org.openstrap.app.ui.dashboard.RecoveryFailure
 import org.openstrap.app.ui.dashboard.Score
 import org.openstrap.app.presentation.TabCopy
 import org.openstrap.app.presentation.TodayCopy
@@ -77,12 +78,16 @@ fun GlowScoreDetailScreen(
     onEditProfile: () -> Unit = {},
     /** For the Sleep score and Naps details: moving, deleting and restoring a sleep or nap. */
     sleepEditing: SleepEditing = SleepEditing(),
+    /** The day's Recovery couldn't be worked out; null when it didn't fail, or failed for another day. */
+    recoveryFailure: RecoveryFailure? = null,
 ) {
     val r = recovery?.takeIf { it.date == state.date }
+    // The day shown failed, so its result is never coming: nothing is held for it.
+    val failed = recoveryFailure?.date == state.date
     // Recovery, Load and Active minutes are read from the day's result, which takes a moment to work out on another
     // day. Until it comes, their page stays on the last day's, so it moves to the next instead of emptying and filling;
     // the strip follows the tap at once. Energy holds its own, with its curve.
-    val held = rememberHeld(r?.let { state to it }, state.date)
+    val held = rememberHeld(r?.let { state to it }, state.date, failed)
     val heldState = held?.first ?: state
     val heldR = held?.second
     fun activityOf(s: DayUiState, result: RecoveryResult?) = ActivityDetailContext(
@@ -93,7 +98,7 @@ fun GlowScoreDetailScreen(
         Score.Recovery -> RecoveryDetail(
             heldState, heldR, strapScore, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, state.date,
         )
-        Score.Energy -> ChargeDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
+        Score.Energy -> ChargeDetail(state, r, failed, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
         Score.Sleep -> SleepScoreDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, sleepEditing)
         Score.Regularity -> RegularityDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
         Score.Naps -> NapsDetail(state, r, onOpen, onSwitch, onSelectDay, contentPadding, onBack, sleepEditing)
@@ -250,12 +255,12 @@ private const val SHORT_CURVE_HOURS = 3f
  */
 @Composable
 private fun ChargeDetail(
-    liveState: DayUiState, liveR: RecoveryResult?, history: DailyHistory,
+    liveState: DayUiState, liveR: RecoveryResult?, failed: Boolean, history: DailyHistory,
     onOpen: (Detail) -> Unit, onSwitch: (Detail) -> Unit, onSelectDay: (LocalDate) -> Unit, contentPadding: PaddingValues, onBack: () -> Unit,
 ) {
     // Another day's Energy takes a moment to work out. Until it is, the last one stays up, so the page moves from one day's
-    // to the next instead of emptying and filling; the strip follows the tap at once.
-    val held = rememberHeld(liveR?.let { liveState to it }, liveState.date)
+    // to the next instead of emptying and filling; the strip follows the tap at once. A day that [failed] isn't waited for.
+    val held = rememberHeld(liveR?.let { liveState to it }, liveState.date, failed)
     val state = held?.first ?: liveState
     val r = held?.second
     val c = r?.charge
@@ -353,11 +358,12 @@ private fun ChargeDetail(
 }
 
 /**
- * [value] while there is one, else the last there was for [HOLD_MS], so a day that is slow to work out is waited for and
- * one that never comes (a failure) isn't covered by another day's page. Null before the first.
+ * [value] while there is one, else the last there was, so a day that is slow to work out is waited for. Not when the
+ * day [failed]: its value is never coming, so it lets go at once rather than leave another day's page up. Not past
+ * [HOLD_MS] either, for a day that never comes without a failure saying so. Null before the first.
  */
 @Composable
-private fun <T : Any> rememberHeld(value: T?, day: LocalDate): T? {
+private fun <T : Any> rememberHeld(value: T?, day: LocalDate, failed: Boolean): T? {
     val last = remember { Last<T>() }
     var gaveUp by remember(day) { mutableStateOf(false) }
     LaunchedEffect(day, value == null) {
@@ -368,7 +374,7 @@ private fun <T : Any> rememberHeld(value: T?, day: LocalDate): T? {
         }
     }
     SideEffect { if (value != null) last.value = value }
-    return value ?: last.value.takeUnless { gaveUp }
+    return value ?: last.value.takeUnless { gaveUp || failed }
 }
 
 private const val HOLD_MS = 4_000L
