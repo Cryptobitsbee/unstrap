@@ -44,7 +44,7 @@
     <string name="core_badge_how_first_indoor">完成一次室内有氧运动，器械或泳池均可。</string>
     <string name="core_badge_how_first_log">在力量训练中记录一组的重量和次数。</string>
     <string name="core_badge_how_first_tabata">完成一次 Tabata，每轮 20 秒训练、10 秒休息。</string>
-    <string name="core_badge_how_first_reps">完成一次间歇跑，按距离或时间重复，中间休息。</string>
+    <string name="core_badge_how_first_reps">完成一次间歇训练，按距离或时间重复，中间休息。</string>
     <string name="core_badge_how_first_mind">完成一次瑜伽或静心练习。</string>
     <string name="core_badge_how_first_game">完成一次球类或竞技运动，例如网球、板式网球或攀岩。</string>
 </resources>

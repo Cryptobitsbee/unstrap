@@ -95,7 +95,7 @@
     <!-- On a badge's sheet: how the badge is earned, in one sentence. Tabata is a workout format, keep it as is. -->
     <string name="core_badge_how_first_tabata">Finish a Tabata, 20 seconds of work and 10 seconds of rest.</string>
     <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
-    <string name="core_badge_how_first_reps">Finish a run of intervals, a distance or a time repeated with rest between.</string>
+    <string name="core_badge_how_first_reps">Finish a workout of intervals, a distance or a time repeated with rest between.</string>
     <!-- On a badge's sheet: how the badge is earned, in one sentence. -->
     <string name="core_badge_how_first_mind">Finish a yoga or calm session.</string>
     <!-- On a badge's sheet: how the badge is earned, in one sentence. -->

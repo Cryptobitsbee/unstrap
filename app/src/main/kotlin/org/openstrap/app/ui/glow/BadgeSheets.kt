@@ -44,7 +44,7 @@ internal fun BadgeSheet(badge: Rewards.Badge, view: RewardsView, onDismiss: () -
             Medal(badgeLook(badge, view.face(badge)), SHEET_MEDAL, Modifier.padding(vertical = 12.dp), locked = row == null, lit = lit)
             SheetText(groupName(badge.group))
             SheetTitle(badge.title)
-            SheetText(howToEarn(badge), Color.White.copy(alpha = LINE_ALPHA), GlowType.body)
+            howToEarn(badge)?.let { SheetText(it, Color.White.copy(alpha = LINE_ALPHA), GlowType.body) }
             when {
                 row != null -> SheetText(stringResource(R.string.glow_goals_earned_on, RewardsCopy.dayLong(row.earnedAt)), Color.White)
                 progress != null -> Column(
@@ -127,16 +127,19 @@ private fun SheetText(
     modifier = Modifier.fillMaxWidth().padding(top = top, start = 8.dp, end = 8.dp),
 )
 
-/** How [b] is earned, in a sentence, with its count for the milestones and the weeks in a row. */
+/**
+ * How [b] is earned, in a sentence, with its count for the milestones and the weeks in a row. Null for a badge with
+ * no sentence in [BADGE_HOW] yet: its sheet shows without one rather than crash.
+ */
 @Composable
 @ReadOnlyComposable
-private fun howToEarn(b: Rewards.Badge): String {
+private fun howToEarn(b: Rewards.Badge): String? {
     val need = b.needs?.let { Units.count(it) }.orEmpty()
     return when {
         b.id.startsWith(WORKOUTS_PREFIX) -> stringResource(R.string.core_badge_how_workouts, need)
         b.id.startsWith(KM_PREFIX) -> stringResource(R.string.core_badge_how_km, need)
         b.id.startsWith(GOAL_PREFIX) && b.id != GOAL_FIRST_ID -> stringResource(R.string.core_badge_how_goal_run, need)
-        else -> stringResource(BADGE_HOW.getValue(b.id))
+        else -> BADGE_HOW[b.id]?.let { stringResource(it) }
     }
 }
 
