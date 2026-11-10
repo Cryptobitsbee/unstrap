@@ -404,14 +404,16 @@ class HistorySync internal constructor(
         var ok = true
         loop@ while (true) {
             check(gatt.connected.value) { Strings.app.get(R.string.system_sync_link_dropped) }
-            if (fastRecharge) { ok = got.isNotEmpty(); break }
+            if (fastRecharge) { ok = false; break }
             val chunk = when (val f = client.fetch(spec.code, cursor, zone, previous)) {
                 is GdspFetch.Chunk -> f
                 GdspFetch.Empty -> break@loop
                 is GdspFetch.Failed -> {
                     log("history ${spec.type}: ${f.reason}")
                     if (f.fastRecharge) fastRecharge = true
-                    if (f.cyclic || --retries <= 0 || fastRecharge) { ok = got.isNotEmpty(); break@loop }
+                    // Zepp's type result is the last exchange's status (`l59.f`, `ixi.a`): chunks that came first are
+                    // still stored, but the type failed, and so does the sync.
+                    if (f.cyclic || --retries <= 0 || fastRecharge) { ok = false; break@loop }
                     continue@loop
                 }
             }
