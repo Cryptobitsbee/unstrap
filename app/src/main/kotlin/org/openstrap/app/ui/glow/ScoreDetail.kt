@@ -86,17 +86,19 @@ fun GlowScoreDetailScreen(
     val failed = recoveryFailure?.date == state.date
     // Recovery, Load and Active minutes are read from the day's result, which takes a moment to work out on another
     // day. Until it comes, their page stays on the last day's, so it moves to the next instead of emptying and filling;
-    // the strip follows the tap at once. Energy holds its own, with its curve.
-    val held = rememberHeld(r?.let { state to it }, state.date, failed)
-    val heldState = held?.first ?: state
-    val heldR = held?.second
+    // the strip follows the tap at once. Energy holds its own, with its curve. The strap's score is held with its day,
+    // as it stands in for Recovery while the score is learning: else the held page would lose its number meanwhile.
+    val held = rememberHeld(r?.let { HeldDay(state, it, strapScore) }, state.date, failed)
+    val heldState = held?.state ?: state
+    val heldR = held?.result
+    val heldStrapScore = if (held != null) held.strapScore else strapScore
     fun activityOf(s: DayUiState, result: RecoveryResult?) = ActivityDetailContext(
         s, result, workouts, activity, history, onOpen, onSwitch, onSelectDay, onEditProfile, contentPadding, onBack,
         stripDate = state.date,
     )
     when (score) {
         Score.Recovery -> RecoveryDetail(
-            heldState, heldR, strapScore, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, state.date,
+            heldState, heldR, heldStrapScore, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, state.date,
         )
         Score.Energy -> ChargeDetail(state, r, failed, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
         Score.Sleep -> SleepScoreDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, sleepEditing)
@@ -384,6 +386,9 @@ private fun <T : Any> rememberHeld(value: T?, day: LocalDate, failed: Boolean): 
 private const val HOLD_MS = 4_000L
 
 private class Last<T : Any> { var value: T? = null }
+
+/** A day's page as [rememberHeld] keeps it: the day, its result, and the strap's own score for its night. */
+private class HeldDay(val state: DayUiState, val result: RecoveryResult, val strapScore: Int?)
 
 /* ---------------------------------------------- Related --------------------------------------------- */
 
