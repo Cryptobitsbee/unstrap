@@ -44,6 +44,19 @@ object BlePermissions {
             bluetooth.toTypedArray()
         }
 
+    /** Notifications for the foreground service's notification: asked for on Android 13 and later, granted before. */
+    val notifications: List<String>
+        @SuppressLint("InlinedApi")
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
+
+    /** Whether notifications may be shown now (always, before Android 13). */
+    fun notificationsGranted(context: Context): Boolean =
+        notifications.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+
+    /** Whether a request's [result] turned notifications down. Absent (before Android 13) is not a denial. */
+    @SuppressLint("InlinedApi")
+    fun notificationsDenied(result: Map<String, Boolean>): Boolean = result[Manifest.permission.POST_NOTIFICATIONS] == false
+
     /** Whether the strap may be scanned for and connected to now. */
     fun granted(context: Context): Boolean =
         bluetooth.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }

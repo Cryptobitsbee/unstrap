@@ -368,6 +368,8 @@ private fun HealthConnectPageHost(hooks: PageHooks, padding: PaddingValues, onBa
             if (!installHealthConnect(context)) Toast.makeText(context, HC_STORE_FAILED, Toast.LENGTH_LONG).show()
         },
         onBack = onBack,
+        caloriesMissing = hooks.healthConnect.caloriesMissing,
+        onOfferCalories = hooks.healthConnect.offerCalories,
     )
 }
 

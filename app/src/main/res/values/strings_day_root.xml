@@ -35,6 +35,11 @@
     <string name="day_nearby_open_settings">Open settings</string>
     <!-- Its button that closes it. -->
     <string name="day_nearby_not_now">Not now</string>
+    <!-- The same dialog when location was turned down for good for a GPS workout. -->
+    <string name="day_location_blocked_text">GPS workouts need location access. Android won\'t ask again, so turn it on in unstrap\'s settings, under Permissions.</string>
+    <!-- The same dialog when notifications were turned down for good: its title and text. -->
+    <string name="day_notifications_blocked_title">Allow notifications</string>
+    <string name="day_notifications_blocked_text">unstrap shows your workout and strap status as a notification. Android won\'t ask again, so turn it on in unstrap\'s settings, under Notifications.</string>
 
     <!-- A message after a pull to sync failed, then "Your data is still on the strap." -->
     <string name="day_pull_sync_failed">Couldn\'t sync. <xliff:g id="data_on_strap" example="Your data is still on the strap.">%1$s</xliff:g></string>

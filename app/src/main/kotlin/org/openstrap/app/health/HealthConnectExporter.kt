@@ -131,6 +131,10 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     suspend fun hasPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
+    /** Whether the optional calorie permissions are granted, for the Health Connect page's offer to ask again. */
+    suspend fun hasCaloriePermissions(): Boolean =
+        client.permissionController.getGrantedPermissions().containsAll(caloriePermissions)
+
     /** The record reads the user has granted (any of them is enough to import that kind). */
     suspend fun hasReadPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().any { it in readPermissions }
