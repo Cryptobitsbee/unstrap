@@ -14,7 +14,6 @@ import androidx.compose.runtime.setValue
 import java.time.LocalDate
 import kotlinx.coroutines.delay
 import org.openstrap.app.device.ConnectionState
-import org.openstrap.app.device.SyncState
 import org.openstrap.app.ui.dashboard.DataPreview
 import org.openstrap.app.ui.dashboard.DayUiState
 import org.openstrap.app.ui.dashboard.PAIRED_HOLD_MS
@@ -54,7 +53,8 @@ internal fun rememberStrapHeader(facts: StrapFacts, day: DayUiState, preview: St
     }
     val realLastSeen = listOfNotNull(
         seenConnected,
-        (facts.sync as? SyncState.Done)?.atEpochSeconds,
+        // The kept time of the last full sync, the status every screen and widget reads, not this run's last Done.
+        facts.syncRecord.lastSuccess,
         day.heartRate.lastOrNull()?.x?.takeIf { day.date == LocalDate.now() },
     ).maxOrNull()
     // The chip's "18 min ago" moves on by itself.

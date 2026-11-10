@@ -64,6 +64,7 @@
     <!-- Its text when connecting failed. A Retry button is beside it. -->
     <string name="system_strap_failed">Couldn\'t reach the strap</string>
     <string name="system_strap_not_connected">Strap not connected</string>
+    <string name="system_strap_bluetooth_off">Bluetooth is off</string>
     <!-- Its text during a sync. The step is "Preparing…" or "Syncing heart rate (3/12)". -->
     <string name="system_strap_syncing"><xliff:g id="step" example="Syncing heart rate (3/12)">%1$s</xliff:g></string>
     <!-- Its text when the strap's battery is low and it isn't charging. -->
@@ -82,6 +83,7 @@
     <string name="system_strap_header_synced"><xliff:g id="strap" example="Strap 71%">%1$s</xliff:g>, synced</string>
     <!-- Action buttons. -->
     <string name="system_strap_action_retry">Retry</string>
+    <string name="system_strap_action_turn_on">Turn on</string>
     <string name="system_strap_action_start_workout">Start workout</string>
     <string name="system_strap_action_sync">Sync now</string>
 

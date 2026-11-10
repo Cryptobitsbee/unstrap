@@ -106,6 +106,17 @@ class StrapConnectTest {
     }
 
     @Test
+    fun bluetoothOffIsItsOwnStateAndNothingIsOpened() = runTest {
+        val address = "AA:BB:CC:00:00:09"
+        pair(address)
+        shadowOf(adapter).setEnabled(false)
+        val strap = StrapManager(context, settings, db.healthDao(), backgroundScope)
+        strap.connect()
+        strap.connection.first { it == ConnectionState.BluetoothOff }
+        assertTrue(gatts(address).isEmpty())
+    }
+
+    @Test
     fun aSilentStrapOnALiveLinkEndsInFailedWithAReconnect() = runTest {
         val address = "AA:BB:CC:00:00:02"
         pair(address)
