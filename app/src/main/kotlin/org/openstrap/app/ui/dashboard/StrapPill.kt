@@ -55,8 +55,9 @@ import org.openstrap.app.ui.theme.MetricColors
  *  - connected: green as far as the battery, fading out into the pill, the percent in the middle (amber when low)
  *  - charging: the same green, flowing, with a bolt before the number
  *  - not synced: orange all over, with the (i)
- *  - not connected: the strap as the Strap page draws it, broken across the middle
- *  - connecting or not paired: that strap, whole
+ *  - not connected, connecting or not paired: the strap as the Strap page draws it, dimmed, with its words ("2 h ago",
+ *    "Not connected"), which tell the three apart. Not connected is mostly out of range or Bluetooth off and passes, so
+ *    it isn't drawn as damage.
  * Green and amber are for the strap and the sync only, never a health value (spec 2.2).
  */
 
@@ -161,18 +162,17 @@ private fun PillContent(chip: StrapChip) {
             Spacer(Modifier.width(6.dp))
             PillText(chip.text)
         }
-        StrapChip.Dot.Warn -> StrapAndWords(chip.text, broken = true)
-        StrapChip.Dot.Quiet -> StrapAndWords(chip.text, broken = false)
+        StrapChip.Dot.Warn, StrapChip.Dot.Quiet -> StrapAndWords(chip.text)
     }
 }
 
 /** The Strap page's strap drawing, small (its light out and the drawing dimmed, as it is when the strap isn't there). */
 @Composable
-private fun StrapAndWords(text: String, broken: Boolean) {
+private fun StrapAndWords(text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         StrapDrawing(
             led = Color.White, lit = false, syncing = false, modifier = Modifier.size(width = MARK_WIDTH, height = MARK_HEIGHT),
-            broken = broken, lineScale = MARK_LINES,
+            lineScale = MARK_LINES,
         )
         if (text.isNotEmpty()) {
             Spacer(Modifier.width(7.dp))

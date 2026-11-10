@@ -19,11 +19,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 
 /*
@@ -34,8 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
  * The strap seen from the front, drawn in line: the band running off the top and bottom with a faint weave, the pod as
  * a rectangle a little wider than the band with its bevel, one highlight and the lugs, and its light in [led]. While it
  * syncs, an arc turns round the light. When it isn't connected the drawing dims and the light goes out to a ring.
- * [broken] cuts it across the pod and slides the two halves apart, a strap come away. [lineScale] thickens every line,
- * for a drawing too small for the hairlines of the card's.
+ * [lineScale] thickens every line, for a drawing too small for the hairlines of the card's.
  */
 @Composable
 internal fun StrapDrawing(
@@ -43,7 +39,6 @@ internal fun StrapDrawing(
     lit: Boolean,
     syncing: Boolean,
     modifier: Modifier,
-    broken: Boolean = false,
     lineScale: Float = 1f,
 ) {
     // The turn is a State read only in draw, so a syncing strap redraws each frame without recomposing.
@@ -74,7 +69,7 @@ internal fun StrapDrawing(
             }
             val c = o(60f, 75f)
             val glow = Brush.radialGradient(listOf(led.copy(alpha = 0.55f), led.copy(alpha = 0f)), c, 14f * k)
-            val strap: DrawScope.() -> Unit = {
+            onDrawBehind {
                 // The band: a faint weave between its two edges, which fade out at the card's top and bottom.
                 for (row in 0 until 25) {
                     val y = row * 6f
@@ -99,22 +94,9 @@ internal fun StrapDrawing(
                     }
                 } else drawCircle(white.copy(alpha = 0.6f), 3.2f * k, c, style = Stroke(s))
             }
-            onDrawBehind {
-                if (!broken) strap()
-                else {
-                    // Cut across the pod: the top half slips left and the bottom half right, with a gap between.
-                    clipRect(0f, 0f, size.width, (BREAK_AT - BREAK_GAP) * k) { translate(left = -BREAK_SHIFT * k) { strap() } }
-                    clipRect(0f, (BREAK_AT + BREAK_GAP) * k, size.width, size.height) { translate(left = BREAK_SHIFT * k) { strap() } }
-                }
-            }
         },
     )
 }
-
-/** Where a broken strap is cut (the pod's middle, on the 120 by 150 grid), the half gap either side, and how far each half slips. */
-private const val BREAK_AT = 75f
-private const val BREAK_GAP = 5f
-private const val BREAK_SHIFT = 9f
 
 /** The weave's dashes on the rows that start at the band's left edge, and on the rows between them. */
 private val WeaveOdd = floatArrayOf(44f, 52f, 60f, 68f)
