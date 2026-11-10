@@ -198,6 +198,7 @@ internal fun LiveFrame(
             if (!connected && !r.paused) {
                 PageNote(WorkoutCopy.STRAP_GONE_NOTE)
             }
+            if (r.endFailed) NotSavedNotice(controls.onEnd)
             r.endPrompt?.let { at -> StoppedPrompt(r, at, controls.onEndAtPrompt, controls.onKeepGoing) }
             if (!fill || r.paused) Spacer(Modifier.weight(1f))
             FrameControls(r, controls, lap, labelled, paused != null, quiet, tapHint)
@@ -244,6 +245,7 @@ private fun ColumnScope.LandscapePanes(
                 // Beside a shared bar the moving time stays over the page, as it is upright.
                 if (bar && time != null) MovingTime(time)
                 if (!bar && !connected && !r.paused) PageNote(WorkoutCopy.STRAP_GONE_NOTE)
+                if (!bar && r.endFailed) NotSavedNotice(controls.onEnd)
                 if (!bar) r.endPrompt?.let { at -> StoppedPrompt(r, at, controls.onEndAtPrompt, controls.onKeepGoing) }
                 if (r.paused && paused != null) paused() else content()
             }
@@ -441,6 +443,7 @@ internal fun LiveBottomBar(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val items: @Composable ColumnScope.() -> Unit = {
         if (!connected) PageNote(WorkoutCopy.STRAP_GONE_NOTE)
+        if (r.endFailed) NotSavedNotice(controls.onEnd)
         r.endPrompt?.let { at -> StoppedPrompt(r, at, controls.onEndAtPrompt, controls.onKeepGoing) }
         val at = position()
         val view = stringResource(R.string.workout_live_view_of, kotlin.math.round(at).toInt() + 1, count)
@@ -520,6 +523,16 @@ internal fun FlatButton(container: Color, size: Dp, modifier: Modifier = Modifie
             .then(if (onClick != null) Modifier.pressClickable(onClick, CircleShape) else Modifier),
         contentAlignment = Alignment.Center,
     ) { content() }
+}
+
+/** End was tried and couldn't save: the workout records on, and Try again runs End again. */
+@Composable
+internal fun NotSavedNotice(onTryAgain: () -> Unit) {
+    QuietPanel {
+        GlowHeader(stringResource(R.string.workout_live_not_saved_title))
+        PageNote(stringResource(R.string.workout_live_not_saved_note))
+        WorkoutButton(stringResource(R.string.workout_live_try_again), Color.White, Color.Black, onTryAgain)
+    }
 }
 
 /** "Looks like you've stopped": end where the wearer stopped, or keep going. The strap has buzzed already. */

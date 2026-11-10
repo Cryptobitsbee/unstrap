@@ -713,6 +713,64 @@ class WorkoutSessionTest {
     }
 
     @Test
+    fun aFailedEndShowsOnTheLiveStateAndTryAgainEndsIt() {
+        val s = session()
+        val t0 = clock.now
+        s.start(sportType = 1)
+        s.recording()
+        clock.advance(Duration.ofSeconds(300))
+        dao.failing = true
+        s.end()
+        val failed = s.recording { it.endFailed }
+        assertTrue(failed.saveFailed)
+        assertNull(stored(t0)?.end)
+
+        // Try again is End again, and the flag goes once it saves.
+        dao.failing = false
+        s.end()
+        s.state.await { it is WorkoutState.Ended }
+        assertNotNull(stored(t0)?.end)
+    }
+
+    @Test
+    fun aLaterSuccessDoesNotHideUnsavedSets() {
+        val s = session()
+        s.start(sportType = 1)
+        s.recording()
+        dao.failingSets = true
+        s.startSet()
+        s.recording { SavePart.Sets in it.failing }
+        // A lap saves the workout fine, and the sets are still unsaved.
+        clock.advance(Duration.ofSeconds(30))
+        s.lap()
+        val r = s.recording { it.workout.lapMarks.isNotEmpty() }
+        assertTrue(SavePart.Sets in r.failing)
+        assertTrue(r.saveFailed)
+
+        dao.failingSets = false
+        clock.advance(Duration.ofSeconds(5))
+        s.setDone()
+        s.recording { it.failing.isEmpty() && !it.saveFailed }
+    }
+
+    @Test
+    fun startSaysWhetherItStartedOrAWorkoutRecordsAlready() {
+        val s = session()
+        assertEquals(StartResult.Started, runBlocking { s.start(sportType = 1).await() })
+        assertTrue(s.inProgress)
+        assertEquals(StartResult.AlreadyRecording, runBlocking { s.start(sportType = 2).await() })
+    }
+
+    @Test
+    fun startFailsWhenTheRowCantBeWritten() {
+        val s = session()
+        dao.failing = true
+        assertEquals(StartResult.Failed, runBlocking { s.start(sportType = 1).await() })
+        assertTrue(!s.inProgress)
+        assertTrue(s.state.value is WorkoutState.Idle)
+    }
+
+    @Test
     fun theSeedIsRecordedBeforeTheLiveReadings() {
         val t0 = clock.now
         clock.advance(Duration.ofSeconds(120))
@@ -841,6 +899,8 @@ class WorkoutSessionTest {
     /** [HealthDao] that can fail every workout save, or hold the next one until released. */
     private class SwitchableDao(private val real: HealthDao) : HealthDao by real {
         @Volatile var failing = false
+        /** Only the sets' saves fail. */
+        @Volatile var failingSets = false
         @Volatile private var gate: Gate? = null
 
         class Gate {
@@ -861,7 +921,7 @@ class WorkoutSessionTest {
         }
 
         override suspend fun upsertSets(sets: List<org.openstrap.app.data.db.AppWorkoutSet>) {
-            if (failing) throw android.database.sqlite.SQLiteException("disk I/O error")
+            if (failing || failingSets) throw android.database.sqlite.SQLiteException("disk I/O error")
             real.upsertSets(sets)
         }
 
