@@ -79,7 +79,7 @@ class BlePermissionsTest {
         assertFalse(BlePermissions.granted(mapOf(Manifest.permission.BLUETOOTH_CONNECT to true)))
     }
 
-    @Test fun `a notifications denial is told apart from no answer`() {
+    @Test @Config(sdk = [34]) fun `a notifications denial is told apart from no answer`() {
         val n = Manifest.permission.POST_NOTIFICATIONS
         assertTrue(BlePermissions.notificationsDenied(mapOf(n to false)))
         assertFalse(BlePermissions.notificationsDenied(mapOf(n to true)))
