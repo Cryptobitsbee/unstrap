@@ -264,6 +264,12 @@ class AppRootViewModel(
         else -> HcState.Needs(healthConnect.requestedPermissions)
     }
 
+    /** Just the calorie permissions, for the Health Connect page's "Offer calories again". Granted when nothing is left to ask. */
+    suspend fun healthConnectCalories(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
+        healthConnect.hasCaloriePermissions() -> HcState.Granted
+        else -> HcState.Needs(healthConnect.caloriePermissions)
+    }
+
     suspend fun healthConnectRead(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
         healthConnect.hasReadPermissions() -> HcState.Granted
         else -> HcState.Needs(healthConnect.readPermissions)

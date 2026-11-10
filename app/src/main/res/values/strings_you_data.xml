@@ -99,6 +99,9 @@
     <string name="you_hc_restore_note">Bring back what unstrap saved there</string>
     <string name="you_hc_open">Open Health Connect</string>
     <string name="you_hc_open_note">Permissions and data</string>
+    <!-- The note and button when the calorie permissions are off: asks for just those. -->
+    <string name="you_hc_calories_note">Calories are left out until you allow them.</string>
+    <string name="you_hc_calories_offer">Offer calories again</string>
     <!-- Where Health Connect is a Play Store app that's missing or out of date: the button, and why. -->
     <string name="you_hc_install">Install Health Connect</string>
     <string name="you_hc_install_note">On this phone Health Connect is an app from the Play Store. Install it to copy your data there.</string>

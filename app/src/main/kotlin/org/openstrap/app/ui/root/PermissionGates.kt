@@ -22,7 +22,7 @@ import org.openstrap.app.data.WorkoutPlan
 import org.openstrap.app.device.BlePermissions
 import org.openstrap.app.ui.glow.PageConfirm
 
-/** The Bluetooth and location gates in front of a workout and the Strap page's actions. */
+/** The Bluetooth, location and notification gates in front of a workout and the Strap page's actions. */
 internal class PermissionGates(
     /** Runs the action once Bluetooth may be used. */
     val requestBluetooth: (() -> Unit) -> Unit,
@@ -30,15 +30,18 @@ internal class PermissionGates(
     val startPlan: (WorkoutPlan, SportSettings?) -> Unit,
     /** Asks for location, then runs the action whatever the answer. */
     val requestLocation: (() -> Unit) -> Unit,
-    private val blocked: MutableState<Boolean>,
+    private val blocked: MutableState<BlockedPermission?>,
 ) {
-    /** Bluetooth was turned down for good: Android shows no dialog any more, so the app offers its settings page. */
-    val bluetoothBlocked: Boolean get() = blocked.value
+    /** What was turned down for good: Android shows no dialog any more, so the app offers its settings page. */
+    val blockedPermission: BlockedPermission? get() = blocked.value
 
     fun dismissBlocked() {
-        blocked.value = false
+        blocked.value = null
     }
 }
+
+/** A permission turned down for good, saved by name so the dialog survives a recreate. */
+internal enum class BlockedPermission { BLUETOOTH, LOCATION, NOTIFICATIONS }
 
 /** What waits on the location answer besides a workout: a name rather than a closure, so it can be saved. */
 private enum class GateAction {
@@ -66,7 +69,7 @@ internal fun rememberPermissionGates(
     val bluetoothRequired = stringResource(if (android11) R.string.day_bluetooth_required_location else R.string.day_bluetooth_required)
     val locationDeclined = stringResource(R.string.day_location_declined)
     var pending by rememberSaveable(stateSaver = PendingAction.Saver) { mutableStateOf<PendingAction?>(null) }
-    val blocked = rememberSaveable { mutableStateOf(false) }
+    val blocked = rememberSaveable { mutableStateOf<BlockedPermission?>(null) }
     val btLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val waiting = pending as? PendingAction.StartPlan
         val strapAction = pendingStrap.action
@@ -77,8 +80,15 @@ internal fun rememberPermissionGates(
             BlePermissions.granted(result) -> {
                 waiting?.let(start)
                 strapAction?.invoke()
+                // Notifications are not needed to go ahead, but a no for good leaves the workout notification missing.
+                if (BlePermissions.notificationsDenied(result) && activity != null &&
+                    BlePermissions.turnedDownForGood(activity, BlePermissions.notifications)
+                ) {
+                    blocked.value = BlockedPermission.NOTIFICATIONS
+                }
             }
-            activity != null && BlePermissions.turnedDownForGood(activity, BlePermissions.bluetooth) -> blocked.value = true
+            activity != null && BlePermissions.turnedDownForGood(activity, BlePermissions.bluetooth) ->
+                blocked.value = BlockedPermission.BLUETOOTH
             else -> Toast.makeText(context, bluetoothRequired, Toast.LENGTH_LONG).show()
         }
     }
@@ -87,7 +97,8 @@ internal fun rememberPermissionGates(
         btLauncher.launch(BlePermissions.required())
     }
     val withBluetooth: (PendingAction.StartPlan) -> Unit = { action ->
-        if (BlePermissions.granted(context)) {
+        // Asked again while notifications are missing, so a no for good shows its dialog at the start of a workout.
+        if (BlePermissions.granted(context) && BlePermissions.notificationsGranted(context)) {
             start(action)
         } else {
             pending = action
@@ -99,9 +110,14 @@ internal fun rememberPermissionGates(
     // shows and on every resume, so a lost closure leaves nothing undone.
     var afterLocation by rememberSaveable { mutableStateOf<GateAction?>(null) }
     var refreshReady by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.none { it }) {
-            Toast.makeText(context, locationDeclined, Toast.LENGTH_LONG).show()
+            if (activity != null && BlePermissions.turnedDownForGood(activity, locationPermissions.asList())) {
+                blocked.value = BlockedPermission.LOCATION
+            } else {
+                Toast.makeText(context, locationDeclined, Toast.LENGTH_LONG).show()
+            }
         }
         val waiting = pending as? PendingAction.StartPlan
         if (waiting != null) {
@@ -112,7 +128,6 @@ internal fun rememberPermissionGates(
         afterLocation = null
         refreshReady = null
     }
-    val locationPermissions = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
     val requestLocation: (() -> Unit) -> Unit = { then ->
         afterLocation = GateAction.REFRESH_READY
         refreshReady = then
@@ -130,14 +145,28 @@ internal fun rememberPermissionGates(
     return PermissionGates(requestBluetooth, startPlan, requestLocation, blocked)
 }
 
-/** Nearby devices turned down for good: the way to OpenStrap's settings page, where it can be turned on. */
+/**
+ * Whatever was turned down for good (Nearby devices, location, notifications): the way to unstrap's settings page,
+ * where it can be turned on. Named for Bluetooth, which it first served.
+ */
 @Composable
 internal fun BluetoothBlockedDialog(gates: PermissionGates) {
-    if (!gates.bluetoothBlocked) return
+    val blocked = gates.blockedPermission ?: return
     val context = LocalContext.current
+    val location = BlePermissions.scanNeedsLocationOn
+    val title = when (blocked) {
+        BlockedPermission.BLUETOOTH -> if (location) R.string.day_nearby_title_location else R.string.day_nearby_title
+        BlockedPermission.LOCATION -> R.string.day_nearby_title_location
+        BlockedPermission.NOTIFICATIONS -> R.string.day_notifications_blocked_title
+    }
+    val text = when (blocked) {
+        BlockedPermission.BLUETOOTH -> if (location) R.string.day_nearby_text_location else R.string.day_nearby_text
+        BlockedPermission.LOCATION -> R.string.day_location_blocked_text
+        BlockedPermission.NOTIFICATIONS -> R.string.day_notifications_blocked_text
+    }
     PageConfirm(
-        title = stringResource(if (BlePermissions.scanNeedsLocationOn) R.string.day_nearby_title_location else R.string.day_nearby_title),
-        text = stringResource(if (BlePermissions.scanNeedsLocationOn) R.string.day_nearby_text_location else R.string.day_nearby_text),
+        title = stringResource(title),
+        text = stringResource(text),
         confirm = stringResource(R.string.day_nearby_open_settings),
         onConfirm = {
             gates.dismissBlocked()
