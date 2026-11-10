@@ -274,6 +274,8 @@ private fun ActiveMinutesDetail(ctx: ActivityDetailContext) {
         Score.ActiveMinutes.title, color, siblings(Detail.OfScore(Score.ActiveMinutes), ctx.onSwitch), onInfo = { info = true }, onBack = ctx.onBack,
         contentPadding = ctx.contentPadding, headline = headline, strip = stepsStrip(ctx), onDay = ctx.onSelectDay,
         ranges = ranges, range = range, onRange = { rangeIndex = ranges.indexOf(it) }, scrubbed = { scrub },
+        // The figures are the held day's ([ActivityDetailContext.stripDate]), so they move when it does.
+        headlineDay = date,
         // The card's picture: the week's minutes as blocks toward the 150 to aim for. It's the week's number the card
         // shows, so the blocks belong to Week, over the days that make them.
         heroPicture = if (a != null && range == Range.Week) {
@@ -368,6 +370,8 @@ private fun LoadDetail(ctx: ActivityDetailContext) {
         Score.Load.title, color, siblings(Detail.OfScore(Score.Load), ctx.onSwitch), onInfo = { info = true }, onBack = ctx.onBack,
         contentPadding = ctx.contentPadding, headline = headline, strip = stepsStrip(ctx, DailyMetric.HeartRate), onDay = ctx.onSelectDay,
         ranges = ranges, range = range, onRange = { rangeIndex = ranges.indexOf(it) }, scrubbed = { scrub },
+        // The figures are the held day's ([ActivityDetailContext.stripDate]), so they move when it does.
+        headlineDay = ctx.state.date,
         // The Load card's picture: today's Load filling over your usual band, as on Today and Activity.
         heroPicture = if (r != null && range == Range.Day) {
             { DetailPicture(height = 40.dp) { m -> LevelFill(r.load, band, color, PictureSize.Wide, m) } }

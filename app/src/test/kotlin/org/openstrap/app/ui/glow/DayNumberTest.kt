@@ -17,7 +17,8 @@ import org.robolectric.annotation.Config
 
 /**
  * A detail's figure moves to another day's without jumping: a count runs one way from the figure shown to the new one
- * (2,500 to 4,500 never reads 4,500, then 2,500, then climbs back), and a change that isn't a day's lands at once.
+ * (2,500 to 4,500 never reads 4,500, then 2,500, then climbs back), and a change that isn't a day's lands at once, even
+ * the first one on a day whose figure came in the same as the last day's.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -54,15 +55,14 @@ class DayNumberTest {
         assertEquals(END, seen.last(), 0f)
     }
 
-    @Test fun `a figure that comes later than its day still counts`() {
+    @Test fun `a change after the next day came in the same as the last lands at once`() {
         start()
-        // The day moves first; its figure comes a moment later, as Energy's and Load's do.
+        // The next day's figure is the same as the last day's, so nothing moves; then a live reading changes it.
         day = DAY.plusDays(1)
         frames(LATE_FRAMES)
         value = "4,500"
-        val seen = frames(FRAMES)
-        assertTrue("the first frames read ${seen.take(3)}", seen.first() < END)
-        seen.zipWithNext().forEach { (a, b) -> assertTrue("went back from $a to $b in $seen", b >= a) }
+        val seen = frames(2)
+        assertTrue("the live change read $seen", seen.all { it == START || it == END })
         assertEquals(END, seen.last(), 0f)
     }
 

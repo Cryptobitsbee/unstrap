@@ -142,6 +142,8 @@ internal fun siblings(detail: Detail, onSwitch: (Detail) -> Unit): List<DetailSi
  * Recovery arc, the Sleep horizon), centred with its label and status word under it; [heroPicture] is the card's picture under the value, above the days; [heroSide] sits to the right of
  * a plain value row (heart rate's Live switch). While a chart is scrubbed, [scrubbed] gives the reading under the
  * finger in the headline's place, on the value row in the gauge's place. It's read only inside the hero.
+ * [headlineDay] is the day the [headline] is for, when that isn't the strip's: a page that holds the last day's
+ * figures while the next is worked out ([DayNumber]).
  */
 @Composable
 internal fun DetailTemplate(
@@ -161,6 +163,7 @@ internal fun DetailTemplate(
     heroSide: (@Composable () -> Unit)? = null,
     heroPicture: (@Composable () -> Unit)? = null,
     scrubbed: () -> DetailHeadline? = { null },
+    headlineDay: LocalDate? = strip.firstOrNull { it.selected }?.date,
     body: LazyListScope.() -> Unit,
 ) {
     BackHandler(onBack = onBack)
@@ -203,7 +206,7 @@ internal fun DetailTemplate(
                                     )
                                 }
                                 else -> Row(verticalAlignment = Alignment.Bottom) {
-                                    DayNumber(shown.value, strip.firstOrNull { it.selected }?.date, Modifier.detailNumber(shown.value))
+                                    DayNumber(shown.value, headlineDay, Modifier.detailNumber(shown.value))
                                     Text(
                                         shown.label, color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
                                         style = GlowType.secondary, modifier = Modifier.padding(start = 10.dp, bottom = 2.dp),
@@ -236,19 +239,21 @@ internal fun DetailTemplate(
 /**
  * The hero's figure in dots, moving to the next day's rather than cutting. A figure that is a plain number counts from
  * the one shown to the new one, and when the two are close (a few points, which a count would only step through) it
- * rolls instead, the old one sliding out as the new one slides in. The move belongs to a day change, however late the
- * new figure comes (Energy works its day out first), so a scrub or a live reading lands at once. Never from zero, and
- * not with the system's animations off.
+ * rolls instead, the old one sliding out as the new one slides in. Never from zero, and not with the system's
+ * animations off.
+ *
+ * [day] is the day [value] is for, which on a page that holds the last day's figures while the next day is worked out
+ * (Energy, Load) is the held day, not the one just picked: the figure and its day arrive together, however late. Only
+ * a change that comes with another day moves; a scrub or a live reading lands at once, and so does the first change on
+ * a day whose figure came in the same as the last day's.
  */
 @Composable
 internal fun DayNumber(value: String, day: LocalDate?, modifier: Modifier = Modifier) {
     val animate = rememberAnimationsOn()
     val parsed = remember(value) { PlainNumber.parse(value) }
     val count = remember { Animatable(parsed?.number ?: 0f) }
-    val shown = remember { Shown(value, day, parsed?.number, false) }
-    // This change is a day's when the day moved with it, or moved earlier and the figure is only now coming.
-    val pending = shown.pending || day != shown.day
-    val moving = pending && value != shown.text
+    val shown = remember { Shown(value, day, parsed?.number) }
+    val moving = day != shown.day && value != shown.text
     val from = if (count.isRunning) count.value else shown.number
     val to = parsed?.number
     val step = stepOf(animate && moving, from, to)
@@ -256,7 +261,6 @@ internal fun DayNumber(value: String, day: LocalDate?, modifier: Modifier = Modi
         shown.text = value
         shown.day = day
         shown.number = to
-        shown.pending = pending && !moving
         if (step == Step.Count) shown.countFrom = from
     }
     LaunchedEffect(value, day) {
@@ -303,11 +307,8 @@ private fun stepOf(moving: Boolean, from: Float?, to: Float?): Step = when {
     else -> Step.Count
 }
 
-/**
- * The figure last shown, the day it was for, whether a day has moved that its figure hasn't followed yet, and the
- * figure a count starts from while it waits to run.
- */
-private class Shown(var text: String, var day: LocalDate?, var number: Float?, var pending: Boolean, var countFrom: Float? = null)
+/** The figure last shown, the day it was for, and the figure a count starts from while it waits to run. */
+private class Shown(var text: String, var day: LocalDate?, var number: Float?, var countFrom: Float? = null)
 
 /** The old figure slides out one way and the new one in from the other, up for a higher one, with a fade. */
 private fun roll(up: Boolean): ContentTransform {

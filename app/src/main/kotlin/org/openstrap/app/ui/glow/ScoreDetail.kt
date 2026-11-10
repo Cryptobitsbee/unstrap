@@ -177,10 +177,12 @@ private fun RecoveryDetail(
         contentPadding = contentPadding, headline = headline,
         strip = DetailCopy.strip(stripDate, today, withData), onDay = onSelectDay,
         ranges = ranges, range = range, onRange = { rangeIndex = ranges.indexOf(it) }, scrubbed = { scrub },
+        // The figures are the held day's, so they move when it does, not with the strip.
+        headlineDay = state.date,
         // The arc gauge (chart kit, spec 2.7) holds the day's score, centred, the number inside the half circle.
         heroValue = (score ?: estimate)?.takeIf { range == Range.Day }?.let { shown ->
             // One key for every day, so the arc sweeps from the score shown to the next day's instead of cutting.
-            { ArcGauge(shown / 100f, color, key = Score.Recovery) { DetailScoreNumber(shown, stripDate) } }
+            { ArcGauge(shown / 100f, color, key = Score.Recovery) { DetailScoreNumber(shown, state.date) } }
         },
         // The Recovery card's picture under the gauge: the week to this morning as dots through the band of your usual.
         heroPicture = week.map { it.second?.toFloat() }.takeIf { range == Range.Day && it.any { v -> v != null } }?.let { dots ->
@@ -303,6 +305,8 @@ private fun ChargeDetail(
         contentPadding = contentPadding, headline = headline,
         strip = DetailCopy.strip(liveState.date, today, withData), onDay = onSelectDay,
         ranges = listOf(Range.Day), range = Range.Day, onRange = {}, scrubbed = { scrub },
+        // The figures are the held day's, so they move when it does, not with the strip.
+        headlineDay = state.date,
     ) {
         item {
             if (c == null || now == null || c.points.size < 2) DetailEmpty(TabCopy.chargeLine(now, atWake, c?.anchored == true))
