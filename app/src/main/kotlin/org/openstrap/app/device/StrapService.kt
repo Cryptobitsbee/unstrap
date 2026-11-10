@@ -18,7 +18,6 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
@@ -41,7 +40,6 @@ import org.openstrap.app.data.Workouts
 import org.openstrap.app.presentation.NotificationCopy
 import org.openstrap.app.presentation.StrapBands
 import org.openstrap.app.presentation.TimeOfDay
-import org.openstrap.app.presentation.Units
 import org.openstrap.app.presentation.WorkoutColors
 import org.openstrap.app.presentation.WorkoutWords
 
@@ -57,6 +55,13 @@ class StrapService : LifecycleService() {
     private var shown: Notification? = null
     /** The notification's End asks first: until this time (elapsed realtime) it shows "Yes, end" and "Cancel". */
     private val confirmEnd = MutableStateFlow(0L)
+    /**
+     * "Yes, end" was tapped and [WorkoutSession.end] hasn't finished: the confirmation stays up so a tap on that spot
+     * can't land on Pause. Drops when the workout leaves Recording, or after [END_WAIT_MS] if the end failed.
+     */
+    private val ending = MutableStateFlow(false)
+    /** What the last start command answered, so a workout ending can take the sticky restart back ([syncSticky]). */
+    private var sticky = false
     /** Today's scores for the everyday notification, refreshed after each sync. */
     private val figures = MutableStateFlow<Figures?>(null)
     /**
@@ -94,13 +99,13 @@ class StrapService : LifecycleService() {
             if (!tryForeground(first, withGps, log) && (withGps == base || !tryForeground(first, base, log))) {
                 (workout.state.value as? WorkoutState.Recording)?.let {
                     log("service: no foreground while recording, asking to keep it going")
-                    KeepRecordingNotice.show(this, it.workout.sportType)
+                    KeepRecordingNotice.serviceRefused(this, it.workout.sportType)
                 }
                 stopSelf()
                 return START_NOT_STICKY
             }
             foreground = true
-            KeepRecordingNotice.clear(this)
+            KeepRecordingNotice.serviceUp(this)
         }
         when (intent?.action) {
             // Debug: the workout card with sample figures as this service's notification, or ("clear") its own back.
@@ -113,12 +118,11 @@ class StrapService : LifecycleService() {
             ACTION_RESUME -> workout.resume()
             ACTION_END_ASK -> confirmEnd.value = SystemClock.elapsedRealtime() + CONFIRM_MS
             ACTION_END_CANCEL -> confirmEnd.value = 0
-            ACTION_END -> { confirmEnd.value = 0; workout.end() }
+            ACTION_END -> endConfirmed(workout)
             ACTION_SYNC -> strap.syncNow()
             ACTION_RETRY -> strap.autoConnect()
-            ACTION_UNDO -> intent.getLongExtra(EXTRA_START, 0).takeIf { it > 0 }?.let {
-                workout.undoTrim(it)
-                getSystemService(NotificationManager::class.java).cancel(SUMMARY_ID)
+            ACTION_UNDO -> intent.getLongExtra(EXTRA_START, 0).takeIf { it > 0 }?.let { start ->
+                undo(workout, dao, start, intent.getLongExtra(EXTRA_END, 0), intent.getLongExtra(EXTRA_RECORDED_END, 0))
             }
             ACTION_END_AT -> workout.endAtPrompt()
             ACTION_KEEP -> workout.keepGoing()
@@ -127,8 +131,7 @@ class StrapService : LifecycleService() {
             ACTION_SET_DONE -> workout.setDone()
             ACTION_EXTEND -> workout.extendRest()
         }
-        val recording = workout.state.value is WorkoutState.Recording
-        if (observing) return if (recording) START_STICKY else START_NOT_STICKY
+        if (observing) return stickiness(workout)
         observing = true
         // "End?" falls back to the usual actions if nobody answers.
         lifecycleScope.launch { confirmEnd.collectLatest { until -> if (until > 0) { delay(CONFIRM_MS); confirmEnd.value = 0 } } }
@@ -143,13 +146,12 @@ class StrapService : LifecycleService() {
                 }
             }
         }
-        lifecycleScope.launch { watchEnded(workout.state, dao) }
         lifecycleScope.launch {
             // Live HR changes about once a second, and every post wakes the CPU and redraws the system UI.
             // Connection, battery, charging and workout changes post at once; a bpm-only change waits for the refresh.
             var status: String? = null
             var lastPost = 0L
-            val more = combine(strap.sync, figures, hidden, confirmEnd) { sync, f, h, end -> More(sync, f, h, end) }
+            val more = combine(strap.sync, figures, hidden, confirmEnd, ending) { sync, f, h, end, asked -> More(sync, f, h, end, asked) }
             // Until the session has checked for a workout left recording (a restart after the process died), stay up.
             combine(strap.connection, strap.liveHeartRate, workout.state, workout.restored, more) { c, hr, w, restored, m ->
                 Status(c, hr, w, restored, m)
@@ -157,7 +159,9 @@ class StrapService : LifecycleService() {
                 if (c is ConnectionState.Disconnected || c is ConnectionState.NotPaired) {
                     if (w !is WorkoutState.Recording && restored) { stopSelf(); return@collect }
                 }
-                val confirming = m.confirmEnd > SystemClock.elapsedRealtime()
+                if (w !is WorkoutState.Recording && m.ending) ending.value = false
+                syncSticky(workout)
+                val confirming = m.confirmEnd > SystemClock.elapsedRealtime() || m.ending
                 val now = SystemClock.elapsedRealtime()
                 val n: Notification
                 if (w is WorkoutState.Recording) {
@@ -184,7 +188,49 @@ class StrapService : LifecycleService() {
                 getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, n)
             }
         }
-        return if (recording) START_STICKY else START_NOT_STICKY
+        return stickiness(workout)
+    }
+
+    /** "Yes, end": the confirmation stays up until the workout has ended ([ending]), where it used to reset at once. */
+    private fun endConfirmed(workout: WorkoutSession) {
+        ending.value = true
+        confirmEnd.value = 0
+        workout.end()
+        lifecycleScope.launch { delay(END_WAIT_MS); ending.value = false }
+    }
+
+    /**
+     * Saved's Undo: only while the workout is still as that notification left it (ended on its own, at the time it
+     * named). A trim made by hand since changes both, and is never undone from here. The notification goes either way.
+     */
+    private fun undo(workout: WorkoutSession, dao: HealthDao, start: Long, end: Long, recordedEnd: Long) {
+        lifecycleScope.launch {
+            val w = catching { dao.appWorkoutOnce(start) }.getOrNull()
+            if (w != null && WorkoutNotifier.undoApplies(w, end, recordedEnd)) workout.undoTrim(start)
+            WorkoutNotifier.cancelSaved(this@StrapService)
+        }
+    }
+
+    /**
+     * Sticky while a workout is in progress, or before the session has checked for one: a restart after the process
+     * died comes before [WorkoutSession.restore] finishes, and answering on that instant would drop the workout.
+     */
+    private fun stickiness(workout: WorkoutSession): Int {
+        val s = workout.state.value
+        sticky = !workout.restored.value || s is WorkoutState.Recording || s is WorkoutState.Ended
+        return if (sticky) START_STICKY else START_NOT_STICKY
+    }
+
+    /**
+     * A start command's answer holds until the next one, so once the session has checked and nothing is in progress,
+     * the service starts itself again to answer not sticky.
+     */
+    private fun syncSticky(workout: WorkoutSession) {
+        val s = workout.state.value
+        if (sticky && workout.restored.value && s !is WorkoutState.Recording && s !is WorkoutState.Ended) {
+            sticky = false
+            catching { start(this) }
+        }
     }
 
     /**
@@ -212,9 +258,6 @@ class StrapService : LifecycleService() {
         )
         // Left by the old Quiet switch: Android raises a foreground service's MIN channel to LOW anyway.
         nm.deleteNotificationChannel("strap_quiet")
-        nm.createNotificationChannel(
-            NotificationChannel(SAVED_CHANNEL, getString(R.string.system_channel_saved), NotificationManager.IMPORTANCE_LOW),
-        )
         WorkoutNotification.createChannel(this)
         KeepRecordingNotice.createChannel(this)
         // Left by workout auto-start ("Looks like a workout"), which is gone.
@@ -474,59 +517,6 @@ class StrapService : LifecycleService() {
             WorkoutNotification.actions(paused = false, confirming = true, intent = ::service).forEach(::addAction)
         }
 
-    /**
-     * Once a workout is saved, a quiet summary with View, and Undo when it ended on its own (the stop or car question)
-     * and the time after was kept. It goes when the summary in the app is closed.
-     */
-    private suspend fun watchEnded(workoutState: StateFlow<WorkoutState>, dao: HealthDao) {
-        val nm = getSystemService(NotificationManager::class.java)
-        var previous: WorkoutState? = null
-        workoutState.collect { st ->
-            val was = previous
-            previous = st
-            when {
-                st is WorkoutState.Ended && was is WorkoutState.Recording -> {
-                    val w = dao.appWorkoutOnce(st.start) ?: return@collect
-                    nm.notify(SUMMARY_ID, savedNotification(w))
-                }
-                st !is WorkoutState.Ended -> nm.cancel(SUMMARY_ID)
-            }
-        }
-    }
-
-    private fun savedNotification(w: org.openstrap.app.data.db.AppWorkout): Notification {
-        val end = w.end ?: System.currentTimeMillis() / 1000
-        val duration = WorkoutRecorder.activeSeconds(w.copy(end = null, pausedAt = null), end)
-        val facts = listOfNotNull(
-            Units.workoutClock(duration),
-            w.distanceMeters?.let { Units.distance(it, Units.Precision.Workout, w.distanceFromSteps) },
-            w.averageHeartRate?.let { getString(R.string.system_saved_average_bpm, it) },
-        ).joinToString(", ")
-        val auto = w.endReason == org.openstrap.app.data.db.AppWorkout.END_AUTO || w.endReason == org.openstrap.app.data.db.AppWorkout.END_CAR
-        val cut = w.recordedEnd?.let { it - end }?.takeIf { auto && it >= 60 }
-        val time = TimeOfDay.format(end, java.time.ZoneId.systemDefault())
-        val text = if (cut != null) getString(R.string.system_saved_cut, facts, time, (cut / 60).toInt()) else facts
-        val b = NotificationCompat.Builder(this, SAVED_CHANNEL)
-            .setSmallIcon(R.drawable.ic_stat_unstrap)
-            .setContentTitle(getString(R.string.system_saved_title, Workouts.sportName(w.sportType)))
-            .setContentText(facts)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setCategory(NotificationCompat.CATEGORY_WORKOUT)
-            .setAutoCancel(true)
-            .setContentIntent(openApp())
-            .addAction(NotificationCompat.Action(0, getString(R.string.system_saved_action_view), openApp()))
-        if (cut != null) b.addAction(
-            NotificationCompat.Action(
-                0, getString(R.string.system_saved_action_undo),
-                PendingIntent.getService(
-                    this, REQUEST_UNDO, Intent(this, StrapService::class.java).setAction(ACTION_UNDO).putExtra(EXTRA_START, w.start),
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-                ),
-            ),
-        )
-        return b.build()
-    }
-
     /** Strength on the lock screen: the set or the rest counting down, its progress, and the next step. */
     private fun strengthNotification(r: WorkoutState.Recording, bpm: Int?, connected: Boolean, confirming: Boolean, zones: HeartZones): Notification {
         val now = System.currentTimeMillis()
@@ -617,7 +607,7 @@ class StrapService : LifecycleService() {
         PendingIntent.getService(this, action.hashCode(), Intent(this, StrapService::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE)
 
     private data class Status(val connection: ConnectionState, val heartRate: Int?, val workout: WorkoutState, val restored: Boolean, val more: More)
-    private data class More(val sync: SyncState, val figures: Figures?, val hidden: Hidden?, val confirmEnd: Long)
+    private data class More(val sync: SyncState, val figures: Figures?, val hidden: Hidden?, val confirmEnd: Long, val ending: Boolean)
     private data class Hidden(val problem: String?)
     private data class Figures(
         val recovery: Int?, val charge: Int?, val sport: Int, val syncedAt: Long?,
@@ -631,14 +621,15 @@ class StrapService : LifecycleService() {
         internal const val ACTION_END_CANCEL = "org.openstrap.app.workout.END_CANCEL"
         private const val ACTION_SYNC = "org.openstrap.app.strap.SYNC"
         private const val ACTION_RETRY = "org.openstrap.app.strap.RETRY"
-        private const val ACTION_UNDO = "org.openstrap.app.workout.UNDO"
+        internal const val ACTION_UNDO = "org.openstrap.app.workout.UNDO"
         private const val ACTION_HIDE = "org.openstrap.app.strap.HIDE"
-        private const val EXTRA_START = "start"
-        private const val SUMMARY_ID = 4
-        private const val SAVED_CHANNEL = "workout_saved"
+        internal const val EXTRA_START = "start"
+        internal const val EXTRA_END = "end"
+        internal const val EXTRA_RECORDED_END = "recorded_end"
         private const val REQUEST_START = 5
-        private const val REQUEST_UNDO = 6
         private const val CONFIRM_MS = 6_000L
+        /** How long "Yes, end" stays up for an end that hasn't finished; a failed end brings the usual actions back. */
+        private const val END_WAIT_MS = 15_000L
         private const val FIGURES_REFRESH_MS = 30 * 60_000L
         /** The red dot in the "OS." logo, the app's heart colour: zone 5's red. */
         private const val BRAND_DOT = WorkoutColors.ZONE_5
@@ -656,7 +647,7 @@ class StrapService : LifecycleService() {
         private const val ACTION_EXTEND = "org.openstrap.app.workout.EXTEND"
         /** Each zone's length on the notification's progress bar. */
         private const val ZONE_SPAN = 20
-        private const val REQUEST_OPEN = 2
+        internal const val REQUEST_OPEN = 2
 
         /** Whether the service is up; a start then needn't (and, once swiped away, mustn't) post its notification. */
         @Volatile var running = false

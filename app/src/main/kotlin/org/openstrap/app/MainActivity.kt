@@ -406,6 +406,7 @@ private fun AppRoot(
             strapOpened = { growFrom = growOrigin.take() },
             showWorkout = { container.workout.minimized.value = false },
         ),
+        container.workout.state,
     )
     // Starting a workout closes Ready and Choose. [saved] is what Ready opens on next time for the sport, and Choose's
     // Start on your usual saves nothing new.

@@ -49,4 +49,25 @@ class KeepRecordingNoticeTest {
             service.destroy()
         }
     }
+
+    @Test
+    fun aClearThatLandsAfterTheServicesRefusalLeavesTheNoticeUp() {
+        KeepRecordingNotice.serviceRefused(context, sportType = 1)
+        // The session's start call returned without throwing, after the service had already been refused.
+        KeepRecordingNotice.clear(context)
+        assertNotNull(shadowOf(manager).getNotification(KeepRecordingNotice.NOTIFICATION_ID))
+        KeepRecordingNotice.serviceUp(context)
+        assertNull(shadowOf(manager).getNotification(KeepRecordingNotice.NOTIFICATION_ID))
+    }
+
+    @Test
+    fun theNoticeGoesWhenNothingRecordsEvenAfterTheServicesRefusal() {
+        KeepRecordingNotice.serviceRefused(context, sportType = 1)
+        KeepRecordingNotice.end(context)
+        assertNull(shadowOf(manager).getNotification(KeepRecordingNotice.NOTIFICATION_ID))
+        // And a plain clear works again afterwards.
+        KeepRecordingNotice.show(context, sportType = 1)
+        KeepRecordingNotice.clear(context)
+        assertNull(shadowOf(manager).getNotification(KeepRecordingNotice.NOTIFICATION_ID))
+    }
 }
