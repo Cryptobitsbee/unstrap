@@ -23,6 +23,7 @@ import org.openstrap.app.ui.dashboard.earliestScore
 import org.openstrap.app.ui.dashboard.firstScore
 import org.openstrap.app.ui.dashboard.previewed
 import org.openstrap.app.ui.dashboard.wear
+import org.openstrap.app.ui.components.rememberDayHold
 
 private const val S_PER_MIN = 60
 
@@ -61,13 +62,17 @@ internal fun rememberPreviewedDay(dayVm: DayViewModel, preview: StrapPreview?, d
  */
 @Composable
 internal fun rememberShownDay(
-    shown: PreviewedDay,
+    live: PreviewedDay,
     rootVm: AppRootViewModel,
     clockDate: LocalDate,
     now: Long,
     preview: StrapPreview?,
     data: DataPreview?,
 ): ShownDay {
+    // Another day's rows take a moment to arrive: for that moment the last day stays up, dimmed, then the placeholder
+    // ([rememberDayHold]), never the old day's numbers for long.
+    val hold = rememberDayHold(live.takeIf { it.screen.loaded }, live.screen.date)
+    val shown = hold.value ?: live
     val day = shown.day
     val recovery = shown.recovery
     LaunchedEffect(day.date) { rootVm.dayShown(day.date) }
@@ -93,6 +98,6 @@ internal fun rememberShownDay(
     return ShownDay(
         day, recovery, shown.recoveryFailure, shown.screen.healthspan, checkIn, wear,
         firstScore = first.show || data == DataPreview.FirstScoreShown,
-        loading = !shown.screen.loaded, usualSteps = shown.screen.usualSteps, activity = shown.screen.activity,
+        loading = !shown.screen.loaded, pending = hold.pending, usualSteps = shown.screen.usualSteps, activity = shown.screen.activity,
     )
 }

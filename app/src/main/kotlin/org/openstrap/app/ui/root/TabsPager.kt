@@ -8,7 +8,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
+import org.openstrap.app.ui.components.dayHeld
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
@@ -99,6 +101,8 @@ class ShownDay(
     val firstScore: Boolean,
     /** The day's rows haven't arrived yet: the screens show their placeholders, never another day's numbers. */
     val loading: Boolean = false,
+    /** The last day, kept for a moment while this one loads ([org.openstrap.app.ui.components.rememberDayHold]): drawn dimmed. */
+    val pending: Boolean = false,
     /** Your usual steps by hour for the day shown, null until there are enough worn days. */
     val usualSteps: List<Float>? = null,
     /** Heart points, calories and steps up to the day shown. */
@@ -211,10 +215,10 @@ internal fun TabsPager(
                 detail = { stack -> stack.lastOrNull()?.let { detail(t, it) } },
             ) {
                 PullToSync(strap.sync, connected, container.strap::syncNow) {
-                    TabRoot(
+                    Box(Modifier.dayHeld(shown.pending)) { TabRoot(
                         t, nav, shown, histories, today, container, dayVm, workoutsVm, rootVm, live, padding, showCharge,
                         onChargeConsume, header, onOpenPage, seeHabitAge,
-                    )
+                    ) }
                 }
             }
         }
