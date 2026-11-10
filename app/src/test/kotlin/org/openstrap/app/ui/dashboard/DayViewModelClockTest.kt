@@ -7,6 +7,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineScheduler
@@ -115,3 +116,6 @@ class DayViewModelClockTest {
         const val WAIT_MS = 10_000L
     }
 }
+
+/** The day's rows, now part of [DayViewModel.screen]. */
+private val DayViewModel.state get() = screen.map { it.day }

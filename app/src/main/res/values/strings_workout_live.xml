@@ -386,4 +386,11 @@
     <string name="workout_live_exercise_now">Now</string>
     <!-- A button at the foot of the exercise sheet: no name, the sets are numbered. -->
     <string name="workout_live_exercise_no_name">No name, just number the sets</string>
+
+    <!-- Over the controls on the live screen after End could not save the workout. Short: a headline. -->
+    <string name="workout_live_not_saved_title">Not saved yet</string>
+    <!-- Under that headline: the workout is still recording, nothing was lost. -->
+    <string name="workout_live_not_saved_note">The workout couldn\'t be saved, so it keeps recording.</string>
+    <!-- A button under that note: ends the workout again. -->
+    <string name="workout_live_try_again">Try again</string>
 </resources>

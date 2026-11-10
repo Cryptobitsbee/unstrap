@@ -15,6 +15,9 @@
     <!-- Shortest, the battery alone. -->
     <string name="system_widget_status_percent"><xliff:g id="percent" example="12">%1$d</xliff:g>%%</string>
     <string name="system_widget_status_syncing">Syncing…</string>
+    <string name="system_widget_status_not_synced">Not synced</string>
+    <string name="system_widget_status_bluetooth_off">Bluetooth is off</string>
+    <string name="system_widget_status_bluetooth_off_short">Bluetooth off</string>
     <!-- When the last sync was a while ago: "Synced 09:10", "Synced yesterday", "Synced Tuesday", "Synced Tue 21 Oct" or "Synced Tue". -->
     <string name="system_widget_status_synced">Synced <xliff:g id="when" example="yesterday">%1$s</xliff:g></string>
 

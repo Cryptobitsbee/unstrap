@@ -187,9 +187,10 @@ internal class ConnectionManager(
     private fun scheduleReconnect() {
         if (!wantConnected) return
         // Every attempt would fail at once; Bluetooth coming back on reconnects (see bluetoothChanged), as Zepp waits too.
-        if (context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == false) {
+        if (bluetoothOff()) {
             log("bluetooth is off, reconnecting once it's back on")
             reconnectJob?.cancel()
+            connection.value = ConnectionState.BluetoothOff
             return
         }
         val wait = RETRY_SECONDS[minOf(retries, RETRY_SECONDS.lastIndex)]
@@ -201,6 +202,10 @@ internal class ConnectionManager(
             startConnect()
         }
     }
+
+    /** True when the phone's Bluetooth adapter is off or turning off. */
+    private fun bluetoothOff(): Boolean =
+        context.getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter?.isEnabled == false
 
     /** On the lane, so the cancel and the new job are one step that nothing else can come between. */
     // The catch-all rethrows whenever this job is cancelled, by asking the job rather than the exception's type (C1).
@@ -214,6 +219,12 @@ internal class ConnectionManager(
                 return@onLane
             }
             catching { StrapService.start(context) }.onFailure { log("service start failed: $it") }
+            if (bluetoothOff()) {
+                // Nothing to connect over: the state says so, and Bluetooth coming back on connects (bluetoothChanged).
+                log("bluetooth is off, connecting once it's back on")
+                connection.value = ConnectionState.BluetoothOff
+                return@onLane
+            }
             connection.value = ConnectionState.Connecting
             // A client left over from a lost link still holds one of Android's few GATT client slots.
             gatt?.close()
@@ -277,11 +288,19 @@ internal class ConnectionManager(
         override fun onReceive(c: Context, intent: android.content.Intent) {
             when (intent.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
                 android.bluetooth.BluetoothAdapter.STATE_TURNING_OFF, android.bluetooth.BluetoothAdapter.STATE_OFF -> {
-                    val client = gatt ?: return
                     log("bluetooth turned off")
-                    client.lost()
+                    onLane {
+                        if (wantConnected && !unusable && connection.value != ConnectionState.NotPaired) {
+                            connection.value = ConnectionState.BluetoothOff
+                        }
+                    }
+                    gatt?.lost()
                 }
                 android.bluetooth.BluetoothAdapter.STATE_ON -> onLane {
+                    // Off was only shown for a strap the app was trying to reach; one it isn't trying for is Disconnected.
+                    if (connection.value == ConnectionState.BluetoothOff && (!wantConnected || unusable)) {
+                        connection.value = ConnectionState.Disconnected
+                    }
                     val connected = connection.value is ConnectionState.Connected || connectJob?.isActive == true
                     if (!wantConnected || unusable || connected) return@onLane
                     log("bluetooth back on, reconnecting")
@@ -339,8 +358,9 @@ internal class ConnectionManager(
             gatt = null
             client.close()
             if (wantConnected) {
-                // Keep the foreground service up while we try to get the strap back.
-                connection.value = ConnectionState.Connecting
+                // Keep the foreground service up while we try to get the strap back. With Bluetooth off, scheduleReconnect
+                // says so (the state skips Connecting).
+                connection.value = if (bluetoothOff()) ConnectionState.BluetoothOff else ConnectionState.Connecting
                 scheduleReconnect()
             } else {
                 connection.value = ConnectionState.Disconnected

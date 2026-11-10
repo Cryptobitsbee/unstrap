@@ -53,7 +53,7 @@ object WidgetRefresh {
 
     /**
      * Debug builds: the strap status line every widget shows instead of the real one, for the gallery: "notpaired",
-     * "low", "stale" (4 hours ago), "yesterday", "week" (3 days ago), "syncing", or "none" for no line; null reads
+     * "low", "stale" (4 hours ago), "yesterday", "week" (3 days ago), "syncing", "failed", "bluetooth", or "none" for no line; null reads
      * the strap.
      */
     @Volatile
@@ -70,6 +70,8 @@ object WidgetRefresh {
         "yesterday" -> StrapStatus.StaleSync(now - 86_400)
         "week" -> StrapStatus.StaleSync(now - 3 * 86_400)
         "syncing" -> StrapStatus.Syncing
+        "failed" -> StrapStatus.SyncFailed
+        "bluetooth" -> StrapStatus.BluetoothOff
         else -> null
     }
 

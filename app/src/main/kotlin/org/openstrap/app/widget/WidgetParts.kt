@@ -155,7 +155,12 @@ internal val LocalStatusLine = staticCompositionLocalOf<StatusLine?> { null }
 internal fun statusLine(data: WidgetData): StatusLine? {
     val t = data.now.epochSecond
     val status = if (WidgetRefresh.statusOverride != null) WidgetRefresh.debugStatus(t) else {
-        data.strap?.let { s -> strapStatus(s.paired, s.battery, s.charging, s.lastSyncDone, t, syncing = data.syncing) }
+        data.strap?.let { s ->
+            strapStatus(
+                s.paired, s.battery, s.charging, s.lastSyncDone, t, syncing = data.syncing,
+                failingSince = s.failingSince, bluetoothOff = data.bluetoothOff,
+            )
+        }
     }
     return status?.let { StatusLine.of(it, t, data.zone) }
 }
@@ -354,8 +359,8 @@ private fun StatusTapTarget(line: StatusLine, top: Float) {
 private fun statusAction(status: StrapStatus): Action? {
     val context = LocalContext.current
     return when (status) {
-        StrapStatus.NotPaired, is StrapStatus.LowBattery -> actionStartActivity(openStrap(context))
-        is StrapStatus.StaleSync -> actionRunCallback<SyncNowAction>()
+        StrapStatus.NotPaired, is StrapStatus.LowBattery, StrapStatus.BluetoothOff -> actionStartActivity(openStrap(context))
+        is StrapStatus.StaleSync, StrapStatus.SyncFailed -> actionRunCallback<SyncNowAction>()
         StrapStatus.Syncing -> null
     }
 }
@@ -470,7 +475,8 @@ private fun StatusButtonView(line: StatusLine, f: WidgetFrame) {
         return
     }
     val (icon, color) = when (status) {
-        is StrapStatus.StaleSync -> AppIcons.Refresh04 to MetricColors.warn
+        is StrapStatus.StaleSync, StrapStatus.SyncFailed -> AppIcons.Refresh04 to MetricColors.warn
+        StrapStatus.BluetoothOff -> AppIcons.Bluetooth to MetricColors.warn
         is StrapStatus.LowBattery -> AppIcons.BatteryLow to MetricColors.warn
         else -> AppIcons.Watch to Color.White
     }

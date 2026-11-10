@@ -354,7 +354,8 @@ internal fun MinusPlus(
 private fun StrapHeldNotice(connection: ConnectionState) {
     val container = (LocalContext.current.applicationContext as? OpenStrapApp)?.container ?: return
     val held by container.settings.heldDisconnected.collectAsStateWithLifecycle(false)
-    val away = connection == ConnectionState.Disconnected || connection is ConnectionState.Failed
+    val away = connection == ConnectionState.Disconnected || connection == ConnectionState.BluetoothOff ||
+        connection is ConnectionState.Failed
     if (!held || !away) return
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(

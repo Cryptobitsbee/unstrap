@@ -31,6 +31,7 @@
     <string name="system_strap_authenticating">正在验证密钥…</string>
     <string name="system_strap_failed">无法连接手环</string>
     <string name="system_strap_not_connected">手环未连接</string>
+    <string name="system_strap_bluetooth_off">蓝牙已关闭</string>
     <string name="system_strap_syncing">%1$s</string>
     <string name="system_strap_low_battery">手环电量 %1$d%%。请在今晚充电。</string>
     <string name="system_strap_connected">手环已连接</string>
@@ -42,6 +43,7 @@
     <string name="system_strap_header_charging">手环充电中，%1$d%%</string>
     <string name="system_strap_header_synced">%1$s，已同步</string>
     <string name="system_strap_action_retry">重试</string>
+    <string name="system_strap_action_turn_on">打开</string>
     <string name="system_strap_action_start_workout">开始运动</string>
     <string name="system_strap_action_sync">立即同步</string>
     <string name="system_workout_paused_chip">已暂停</string>

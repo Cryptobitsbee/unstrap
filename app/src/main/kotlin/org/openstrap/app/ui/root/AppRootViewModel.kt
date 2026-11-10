@@ -74,7 +74,8 @@ sealed interface FirstScoreDay {
 }
 
 /** The day shown's own extras: the check-in. The strap's score comes with its Recovery ([RecoveryResult.strapScore]). */
-data class DayExtras(val checkIn: Int? = null)
+/** The check-in of [date], null while that day's is read. */
+data class DayExtras(val date: LocalDate? = null, val checkIn: Int? = null)
 
 /** A badge past history earned, with the weekly goal it was earned at when it is a goal badge. */
 data class EarnedBadge(val badge: Rewards.Badge, val goal: Int?)
@@ -185,7 +186,7 @@ class AppRootViewModel(
 
     /** The day shown's check-in, from [dayShown]. */
     val dayExtras: StateFlow<DayExtras> = shownDay.filterNotNull().flatMapLatest { date ->
-        health.checkIn(date).map { DayExtras(it?.feeling) }
+        health.checkIn(date).map { DayExtras(date, it?.feeling) }
     }.state(DayExtras())
 
     init {
@@ -261,6 +262,12 @@ class AppRootViewModel(
     suspend fun healthConnectWrite(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
         healthConnect.hasPermissions() -> HcState.Granted
         else -> HcState.Needs(healthConnect.requestedPermissions)
+    }
+
+    /** Just the calorie permissions, for the Health Connect page's "Offer calories again". Granted when nothing is left to ask. */
+    suspend fun healthConnectCalories(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
+        healthConnect.hasCaloriePermissions() -> HcState.Granted
+        else -> HcState.Needs(healthConnect.caloriePermissions)
     }
 
     suspend fun healthConnectRead(): HcState = HcState.blocked(healthConnect.availability()) ?: when {

@@ -39,4 +39,15 @@ class SyncRecordTest {
         assertEquals(500L, r.lastAttempt)
         assertEquals(500L, r.failingSince)
     }
+
+    @Test fun `a full sync's success ends the failure and a failure keeps the first time`() {
+        val failing = SyncRecord(lastSuccess = 50).attempted(100).failed(130).attempted(200).failed(230)
+        assertEquals(130L, failing.failingSince)
+        assertEquals(50L, failing.lastSuccess)
+        assertEquals(200L, failing.lastAttempt)
+        val ok = failing.attempted(300).succeeded(330)
+        assertEquals(330L, ok.lastSuccess)
+        assertEquals(300L, ok.lastAttempt)
+        assertNull(ok.failingSince)
+    }
 }

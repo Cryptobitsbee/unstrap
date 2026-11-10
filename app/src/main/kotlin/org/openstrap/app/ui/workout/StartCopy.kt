@@ -31,7 +31,8 @@ object StartCopy {
             bpm?.let { strings.format(R.string.workout_start_strap_ready_bpm, it) } ?: strings.get(R.string.workout_start_strap_ready)
         ConnectionState.Connecting, ConnectionState.Authenticating -> strings.get(R.string.workout_start_strap_connecting)
         ConnectionState.NotPaired -> strings.get(R.string.workout_start_strap_not_paired)
-        ConnectionState.Disconnected, is ConnectionState.Failed -> strings.get(R.string.workout_start_strap_not_connected)
+        ConnectionState.Disconnected, ConnectionState.BluetoothOff, is ConnectionState.Failed ->
+            strings.get(R.string.workout_start_strap_not_connected)
     }
 
     /** The goal chip for no goal, named for the sport: "Just run", "Just walk", "Just ride", else "Just go". */

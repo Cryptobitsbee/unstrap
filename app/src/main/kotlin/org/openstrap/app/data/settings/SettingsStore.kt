@@ -102,7 +102,14 @@ data class BackupState(
     val on get() = folder != null
 }
 
-data class StrapSnapshot(val paired: Boolean, val battery: Int?, val charging: Boolean, val lastSyncDone: Long?)
+data class StrapSnapshot(
+    val paired: Boolean,
+    val battery: Int?,
+    val charging: Boolean,
+    val lastSyncDone: Long?,
+    /** When the syncs began to fail since [lastSyncDone] (epoch seconds), null while they work. */
+    val failingSince: Long? = null,
+)
 
 /**
  * Auto sync to Health Connect: [on] or off (off by default), when OpenStrap last wrote there ([lastSynced], epoch
@@ -621,13 +628,17 @@ class SettingsStore private constructor(private val store: DataStore<Preferences
     private val strapBattery = androidx.datastore.preferences.core.intPreferencesKey(SettingsKeys.STRAP_BATTERY)
     private val strapCharging = androidx.datastore.preferences.core.booleanPreferencesKey(SettingsKeys.STRAP_CHARGING)
     private val syncDone = longPreferencesKey(SettingsKeys.STRAP_LAST_SYNC_DONE)
+    private val syncFailingSince = longPreferencesKey(SettingsKeys.STRAP_SYNC_FAILING_SINCE)
 
     /**
      * What a widget's strap status line reads with the strap away (widgets spec 5): pairing, the battery and charging
      * as last connected, and when a sync last finished.
      */
     val strapSnapshot: Flow<StrapSnapshot> = read { prefs ->
-        StrapSnapshot(prefs[address] != null && prefs[authKey] != null, prefs[strapBattery], prefs[strapCharging] == true, prefs[syncDone])
+        StrapSnapshot(
+            prefs[address] != null && prefs[authKey] != null, prefs[strapBattery], prefs[strapCharging] == true, prefs[syncDone],
+            prefs[syncFailingSince],
+        )
     }
 
     /** The connected strap's battery and charging, written when either changes. */
@@ -638,9 +649,20 @@ class SettingsStore private constructor(private val store: DataStore<Preferences
         }
     }
 
-    /** When a history sync last finished (epoch seconds). Per type cursors are [lastSync]. */
+    /**
+     * When a full history sync last finished (epoch seconds). The failure [setSyncFailing] kept ends with it. Per type
+     * cursors are [lastSync].
+     */
     suspend fun setLastSyncDone(epochSeconds: Long) {
-        store.edit { it[syncDone] = epochSeconds }
+        store.edit {
+            it[syncDone] = epochSeconds
+            it.remove(syncFailingSince)
+        }
+    }
+
+    /** A sync failed at [epochSeconds]: kept as the start of the failing run unless one is already kept. */
+    suspend fun setSyncFailing(epochSeconds: Long) {
+        store.edit { if (it[syncFailingSince] == null) it[syncFailingSince] = epochSeconds }
     }
 
     /** What the strap last took for [what] (a profile checksum, a goal), so a connect alone doesn't send it again. */
@@ -786,7 +808,7 @@ class SettingsStore private constructor(private val store: DataStore<Preferences
             setOf(
                 DEVICE_ADDRESS, DEVICE_AUTH_KEY, DEVICE_NAME,
                 COMPANION_ASSOCIATION_ID, COMPANION_DECLINED, HELD_DISCONNECTED,
-                STRAP_BATTERY, STRAP_CHARGING, STRAP_LAST_SYNC_DONE,
+                STRAP_BATTERY, STRAP_CHARGING, STRAP_LAST_SYNC_DONE, STRAP_SYNC_FAILING_SINCE,
                 ZEPP_APP_TOKEN, ZEPP_USER_ID, ZEPP_API_BASE, ZEPP_CHINA, ZEPP_LOGIN_TOKEN, ZEPP_APP_TOKEN_AT, ZEPP_APP_TTL,
             )
         }
@@ -866,6 +888,7 @@ object SettingsKeys {
     const val STRAP_BATTERY = "strap_battery"
     const val STRAP_CHARGING = "strap_charging"
     const val STRAP_LAST_SYNC_DONE = "strap_last_sync_done"
+    const val STRAP_SYNC_FAILING_SINCE = "strap_sync_failing_since"
     const val BACKUP_FOLDER = "backup_folder"
     const val BACKUP_FOLDER_NAME = "backup_folder_name"
     const val BACKUP_LAST_DONE = "backup_last_done"

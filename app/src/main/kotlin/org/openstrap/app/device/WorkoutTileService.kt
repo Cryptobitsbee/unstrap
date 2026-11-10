@@ -23,6 +23,9 @@ import org.openstrap.app.data.Workouts
 class WorkoutTileService : TileService() {
     private var watching: Job? = null
 
+    /** The sport Ready opens on when tapped idle: the last one done, as an id, never read back from the subtitle. */
+    @Volatile private var readySport: Int = Workouts.DEFAULT_SPORTS.first()
+
     override fun onStartListening() {
         super.onStartListening()
         val container = (application as OpenStrapApp).container
@@ -31,12 +34,13 @@ class WorkoutTileService : TileService() {
                 .collect { (state, last) ->
                     val tile = qsTile ?: return@collect
                     val r = state as? WorkoutState.Recording
-                    tile.state = if (r != null) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
+                    readySport = last?.sportType ?: Workouts.DEFAULT_SPORTS.first()
+                    tile.state = if (state.inProgress) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
                     tile.label = if (r != null) Workouts.sportName(r.workout.sportType) else getString(R.string.tile_workout)
                     tile.subtitle = when {
                         r?.paused == true -> getString(R.string.system_tile_paused)
                         r != null -> getString(R.string.system_tile_recording)
-                        else -> Workouts.sportName(last?.sportType ?: Workouts.DEFAULT_SPORTS.first())
+                        else -> Workouts.sportName(readySport)
                     }
                     tile.updateTile()
                 }
@@ -52,14 +56,11 @@ class WorkoutTileService : TileService() {
     override fun onClick() {
         super.onClick()
         val container = (application as OpenStrapApp).container
-        val recording = container.workout.state.value is WorkoutState.Recording
+        val inProgress = container.workout.inProgress
         val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        if (recording) {
-            intent.putExtra(MainActivity.EXTRA_SHOW_WORKOUT, true)
-        } else {
-            val last = (qsTile?.subtitle?.toString())?.let { name -> Workouts.sports.firstOrNull { it.second == name }?.first }
-            intent.putExtra(MainActivity.EXTRA_READY_SPORT, last ?: Workouts.DEFAULT_SPORTS.first())
-        }
+        // Recording or showing its summary: the live screen or the summary, never Ready behind it.
+        if (inProgress) intent.putExtra(MainActivity.EXTRA_SHOW_WORKOUT, true)
+        else intent.putExtra(MainActivity.EXTRA_READY_SPORT, readySport)
         val pending = PendingIntent.getActivity(this, REQUEST_TILE, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         if (Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(pending)
         else @Suppress("DEPRECATION") startActivityAndCollapse(intent)

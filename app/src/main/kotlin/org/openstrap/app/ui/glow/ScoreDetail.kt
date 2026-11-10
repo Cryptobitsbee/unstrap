@@ -75,7 +75,7 @@ fun GlowScoreDetailScreen(
     /** For the Sleep score and Naps details: moving, deleting and restoring a sleep or nap. */
     sleepEditing: SleepEditing = SleepEditing(),
 ) {
-    val r = recovery?.takeIf { it.date == state.date }
+    val r = recovery
     when (score) {
         Score.Recovery -> RecoveryDetail(state, r, strapScore, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
         Score.Energy -> ChargeDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)

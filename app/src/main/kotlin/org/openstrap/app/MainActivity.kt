@@ -361,7 +361,7 @@ private fun AppRoot(
         day, previewed.recovery, previewed.recoveryFailure, running != null, forced, workoutsVm, onNewDay = dayVm::select,
     )
     val strap = rememberStrapHeader(strapFacts, day, preview)
-    val shown = rememberShownDay(previewed, dayVm, rootVm, today.clockDate, strap.now, preview, dataPreview)
+    val shown = rememberShownDay(previewed, rootVm, today.clockDate, strap.now, preview, dataPreview)
     val histories = remember(container) {
         Histories { m, from, to -> container.health.daily(m, from, to) }
     }
@@ -406,6 +406,7 @@ private fun AppRoot(
             strapOpened = { growFrom = growOrigin.take() },
             showWorkout = { container.workout.minimized.value = false },
         ),
+        container.workout.state,
     )
     // Starting a workout closes Ready and Choose. [saved] is what Ready opens on next time for the sport, and Choose's
     // Start on your usual saves nothing new.
