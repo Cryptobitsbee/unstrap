@@ -161,11 +161,13 @@ class WorkoutSessionTest {
     @Test
     fun reconnectSendsTheConfigAndOneStateAsZepp() {
         val s = session()
-        var battery = 80
-        // A new battery level each time, so the state flow can't fold a quick drop and return into no change.
+        strap.connection.value = ConnectionState.Connected(80, "3.27.0.1")
+        // A login always passes Connecting, so the session sees the link go and come back.
         fun reconnect(): Pair<SportSession.State, Boolean> {
             strap.sportStates.clear()
-            strap.connection.value = ConnectionState.Connected(battery--, "3.27.0.1")
+            strap.connection.value = ConnectionState.Connecting
+            Thread.sleep(SETTLE_MS)
+            strap.connection.value = ConnectionState.Connected(80, "3.27.0.1")
             return runBlocking {
                 withTimeout(WAIT_MS) {
                     while (strap.sportStates.none { it.second }) delay(POLL_MS)
@@ -186,6 +188,49 @@ class WorkoutSessionTest {
         assertEquals(SportSession.State.RESUME to true, reconnect())
         s.end()
         s.state.await { it is WorkoutState.Ended }
+    }
+
+    /**
+     * Zepp sends the workout once at its start and then only on a new login (`xbc.k`, then `rbc` on AUTH_SUCCESS). A
+     * battery or charging change, a new Connected value here, sends nothing.
+     */
+    @Test
+    fun aBatteryChangeDoesNotSendTheWorkoutAgain() {
+        val s = session()
+        strap.connection.value = ConnectionState.Connected(80, "3.27.0.1")
+        s.start(sportType = 1)
+        s.recording()
+        runBlocking { withTimeout(WAIT_MS) { while (strap.sportStates.isEmpty()) delay(POLL_MS) } }
+        Thread.sleep(SETTLE_MS)
+        assertEquals("the start sends it once", listOf(SportSession.State.START to true), strap.sportStates.toList())
+
+        strap.sportStates.clear()
+        strap.connection.value = ConnectionState.Connected(79, "3.27.0.1")
+        strap.connection.value = ConnectionState.Connected(79, "3.27.0.1", charging = true)
+        Thread.sleep(SETTLE_MS)
+        assertEquals(emptyList<Pair<SportSession.State, Boolean>>(), strap.sportStates.toList())
+        s.end()
+        // Seconds long, so it ends unsaved: Idle, not Ended.
+        s.state.await { it !is WorkoutState.Recording }
+    }
+
+    /** A workout started with the strap away sends it when the strap logs in, as Zepp's connect callback does. */
+    @Test
+    fun aWorkoutStartedWithTheStrapAwaySendsItOnConnect() {
+        val s = session()
+        s.start(sportType = 1)
+        s.recording()
+        Thread.sleep(SETTLE_MS)
+        assertEquals(emptyList<Pair<SportSession.State, Boolean>>(), strap.sportStates.toList())
+        strap.connection.value = ConnectionState.Connecting
+        Thread.sleep(SETTLE_MS)
+        strap.connection.value = ConnectionState.Connected(80, "3.27.0.1")
+        runBlocking { withTimeout(WAIT_MS) { while (strap.sportStates.isEmpty()) delay(POLL_MS) } }
+        Thread.sleep(SETTLE_MS)
+        assertEquals(listOf(SportSession.State.START to true), strap.sportStates.toList())
+        s.end()
+        // Seconds long, so it ends unsaved: Idle, not Ended.
+        s.state.await { it !is WorkoutState.Recording }
     }
 
     @Test

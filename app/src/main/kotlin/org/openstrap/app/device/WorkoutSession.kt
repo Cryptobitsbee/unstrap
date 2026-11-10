@@ -12,6 +12,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onSubscription
@@ -1023,10 +1024,12 @@ class WorkoutSession(
             launch { strap.heartRateReadings.collect(::onReading) }
             if (strapSessions) {
                 launch { strap.sportSessionPushes.collect(::onStrapPush) }
-                // On every connect, the workout again as Zepp's `bo60.j(2)`: the config, then one state.
+                // Connected now, and on each new login, the workout again as Zepp's `bo60.j(2)`: the config, then one
+                // state. Zepp calls it at the start and on each AUTH_SUCCESS only (`xbc.k`, `rbc`, `yfk`), never on a
+                // battery change, which here is a new Connected value. Every login passes Connecting first.
                 launch {
-                    strap.connection.collect { c ->
-                        if (c !is ConnectionState.Connected) return@collect
+                    strap.connection.map { it is ConnectionState.Connected }.distinctUntilChanged().collect { connected ->
+                        if (!connected) return@collect
                         val now = (_state.value as? WorkoutState.Recording)?.workout ?: return@collect
                         strapState(reconnectState(now), now, reconnect = true)
                     }
