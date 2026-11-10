@@ -364,6 +364,54 @@ class WorkoutSessionTest {
     }
 
     @Test
+    fun aRestartBringsBackTheRestTimeAddedAndTheKcal() {
+        val t0 = clock.now - 600
+        val settings = SettingsStore(context)
+        runBlocking {
+            db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1))
+            settings.setWorkoutLive(org.openstrap.app.data.settings.WorkoutLive(t0, 20, 50f, 120f))
+        }
+        val s = session(settings = settings)
+        s.restore()
+        assertEquals(20L, s.recording().restExtra)
+        assertEquals(WorkoutRecorder.Kcal(50f, 120f), s.kcal.value)
+    }
+
+    @Test
+    fun anotherWorkoutsKeptFiguresAreNotRestored() {
+        val t0 = clock.now - 600
+        val settings = SettingsStore(context)
+        runBlocking {
+            db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1))
+            settings.setWorkoutLive(org.openstrap.app.data.settings.WorkoutLive(t0 - 3_600, 20, 50f, 120f))
+        }
+        val s = session(settings = settings)
+        s.restore()
+        assertEquals(0L, s.recording().restExtra)
+        assertNull(s.kcal.value)
+    }
+
+    @Test
+    fun theLiveKcalIsKeptWhileRecording() {
+        val settings = SettingsStore(context)
+        runBlocking { settings.saveProfile(profile()) }
+        try {
+            val s = session(settings = settings)
+            s.start(sportType = 1)
+            val start = s.recording().workout.start
+            runBlocking {
+                withTimeout(WAIT_MS) {
+                    while (settings.workoutLive(start) == null) delay(POLL_MS)
+                }
+            }
+            s.end()
+            s.state.await { it !is WorkoutState.Recording }
+        } finally {
+            runBlocking { settings.saveProfile(org.openstrap.app.data.settings.UserProfile()) }
+        }
+    }
+
+    @Test
     fun aWorkoutLeftRecordingComesBackAfterProcessDeath() {
         val t0 = clock.now - 600
         runBlocking {

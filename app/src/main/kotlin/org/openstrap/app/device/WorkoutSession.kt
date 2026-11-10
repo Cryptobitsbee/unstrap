@@ -284,10 +284,13 @@ class WorkoutSession(
             _zoneSeconds.value = WorkoutRecorder.liveZoneSeconds(live, maxHr, heartZones.value).toList()
             lastReading = live.lastOrNull()
             // Never down: kept when this very workout's figure is still in memory (a second try after a failure),
-            // else it starts over, as a figure of another workout would be wrong. Rest time added, a question
-            // open and "in a car" live only in the state and are not stored, so they start afresh: a restart
-            // mustn't ask at once ([askSince]).
-            if (trackStart != w.start) _kcal.value = null
+            // else it comes back from what was kept ([keepLive]), as does the rest time added. A question open
+            // and "in a car" start afresh: a restart mustn't ask at once ([askSince]).
+            val kept = catching { settings.workoutLive(w.start) }.onFailure { log("workout: live figures not read: $it") }.getOrNull()
+            keptLive = kept
+            if (trackStart != w.start) {
+                _kcal.value = kept?.let { k -> k.kcalActive?.let { a -> k.kcalTotal?.let { WorkoutRecorder.Kcal(a, it) } } }
+            }
             stepTotals = emptyList()
             synchronized(allReadings) { allReadings.clear(); allReadings.addAll(live) }
             _history.value = live
@@ -307,7 +310,10 @@ class WorkoutSession(
                 .onFailure { log("workout: sport settings not read: $it") }.getOrNull() == true
             val rounds = if (w.structure != null) dao.roundsOnce(w.start) else emptyList()
             begin(w, maxHr) {
-                it.copy(sets = sets, restUntil = restUntil, exercise = sets.lastOrNull()?.exercise, logSets = log, rounds = rounds)
+                it.copy(
+                    sets = sets, restUntil = restUntil, exercise = sets.lastOrNull()?.exercise, logSets = log, rounds = rounds,
+                    restExtra = kept?.restExtra ?: 0,
+                )
             }
             left
         }
@@ -858,6 +864,22 @@ class WorkoutSession(
             (s as? WorkoutState.Recording)?.takeIf { it.phase(t) is org.openstrap.app.data.Phase.Rest }
                 ?.let { it.copy(restExtra = it.restExtra + REST_ADD_S) } ?: s
         }
+        scope.launch { lock.withLock { keepLive() } }
+    }
+
+    /** The last figures [keepLive] wrote, so an unchanged tick writes nothing. */
+    private var keptLive: org.openstrap.app.data.settings.WorkoutLive? = null
+
+    /**
+     * Keeps the recording workout's rest time added and live kcal, which no row holds, so [restore] brings them back.
+     * Called under [lock], so the writes keep their order.
+     */
+    private suspend fun keepLive() {
+        val r = _state.value as? WorkoutState.Recording ?: return
+        val k = _kcal.value
+        val live = org.openstrap.app.data.settings.WorkoutLive(r.workout.start, r.restExtra, k?.active, k?.total)
+        if (live == keptLive) return
+        catching { settings.setWorkoutLive(live) }.onSuccess { keptLive = live }.onFailure { log("workout: live figures not kept: $it") }
     }
 
     /**
@@ -887,6 +909,7 @@ class WorkoutSession(
                         now.copy(rounds = step.rounds, restExtra = if (step.switch != null) 0 else now.restExtra)
                             .withSave(SavePart.Rounds, failed)
                     }
+                    keepLive()
                 }
                 step.switch?.let { buzz(org.openstrap.app.data.WorkoutBuzz.of(it, game = s is org.openstrap.app.data.Structure.Periods), it.name) }
                 if (step.switch == null && !skip) {
@@ -1167,6 +1190,7 @@ class WorkoutSession(
                 cue(c)
                 update { it.copy(targetReachedAt = t) }
             }
+            if (tick % KCAL_READ_TICKS == 1) lock.withLock { keepLive() }
             delay(KCAL_TICK_MS)
         }
     }

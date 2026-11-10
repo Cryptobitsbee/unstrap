@@ -665,6 +665,17 @@ class SettingsStore private constructor(private val store: DataStore<Preferences
         store.edit { if (it[syncFailingSince] == null) it[syncFailingSince] = epochSeconds }
     }
 
+    private val workoutLive = stringPreferencesKey(SettingsKeys.WORKOUT_LIVE)
+
+    /** What the workout recording since [start] kept of its live-only figures, null when none or another workout's. */
+    suspend fun workoutLive(start: Long): WorkoutLive? =
+        WorkoutLive.decode(store.data.first()[workoutLive])?.takeIf { it.start == start }
+
+    /** Kept for the one workout recording now: a process death brings them back ([workoutLive]). */
+    suspend fun setWorkoutLive(live: WorkoutLive) {
+        store.edit { it[workoutLive] = live.encode() }
+    }
+
     /** What the strap last took for [what] (a profile checksum, a goal), so a connect alone doesn't send it again. */
     suspend fun sentToStrap(what: String): Long? = store.data.first()[longPreferencesKey(SENT_TO_STRAP + what)]
 
@@ -889,6 +900,7 @@ object SettingsKeys {
     const val STRAP_CHARGING = "strap_charging"
     const val STRAP_LAST_SYNC_DONE = "strap_last_sync_done"
     const val STRAP_SYNC_FAILING_SINCE = "strap_sync_failing_since"
+    const val WORKOUT_LIVE = "workout_live"
     const val BACKUP_FOLDER = "backup_folder"
     const val BACKUP_FOLDER_NAME = "backup_folder_name"
     const val BACKUP_LAST_DONE = "backup_last_done"
@@ -908,4 +920,21 @@ object SettingsKeys {
 
     /** The key each sport's [SportSettings][org.openstrap.app.data.SportSettings] is stored under, before the sport's id. */
     const val SPORT_SETTINGS_PREFIX = "sport_settings_"
+}
+
+/**
+ * A recording workout's figures that live only in memory and aren't in its rows: the seconds added to the rest under
+ * way, and the live kcal, which never goes down. Without them a restart would cut the rest short and drop the kcal.
+ */
+data class WorkoutLive(val start: Long, val restExtra: Long, val kcalActive: Float?, val kcalTotal: Float?) {
+    fun encode(): String = listOf(start, restExtra, kcalActive ?: "", kcalTotal ?: "").joinToString(",")
+
+    companion object {
+        private const val FIELDS = 4
+
+        fun decode(text: String?): WorkoutLive? {
+            val p = text?.split(",")?.takeIf { it.size == FIELDS } ?: return null
+            return p[0].toLongOrNull()?.let { WorkoutLive(it, p[1].toLongOrNull() ?: 0, p[2].toFloatOrNull(), p.last().toFloatOrNull()) }
+        }
+    }
 }
