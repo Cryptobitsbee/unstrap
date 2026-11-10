@@ -2,9 +2,10 @@ package org.openstrap.app.ui.root
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.openstrap.app.NavRequest
 import org.openstrap.app.NavigationRequests
 import org.openstrap.app.device.WorkoutState
@@ -21,10 +22,11 @@ internal fun NavRequestsEffect(
 ) {
     val current by rememberUpdatedState(hooks)
     // Whatever started the workout, Ready and Choose go with it; re-run if one is opened while it is in progress.
-    val state by session.collectAsState()
+    val state by session.collectAsStateWithLifecycle()
     val inProgress = state is WorkoutState.Recording || state is WorkoutState.Ended
     val overlay = nav.workout
-    LaunchedEffect(inProgress, overlay) { if (inProgress) nav.sessionInProgress() }
+    // Reads overlay so a Ready opened during the session is closed too.
+    if (inProgress && overlay != WorkoutOverlay.None) SideEffect { nav.sessionInProgress() }
     LaunchedEffect(requests, nav) {
         requests.requests.collect { r ->
             val h = current

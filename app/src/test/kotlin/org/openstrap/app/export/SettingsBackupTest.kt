@@ -74,7 +74,7 @@ class SettingsBackupTest {
             "device_address", "device_auth_key", "device_name",
             "zepp_app_token", "zepp_user_id", "zepp_api_base", "zepp_china", "zepp_login_token", "zepp_app_token_at", "zepp_app_ttl",
             "companion_association_id", "companion_declined", "held_disconnected",
-            "strap_battery", "strap_charging", "strap_last_sync_done", "strap_sessions",
+            "strap_battery", "strap_charging", "strap_last_sync_done", "strap_sync_failing_since", "strap_sessions",
             "buzz_calls", "buzz_notifications", "health_connect_auto", "health_connect_synced", "health_connect_auto_stopped",
             "backup_folder", "backup_folder_name", "backup_last_done", "backup_failed", "backup_failed_at",
             "goal_moment_week", "recap_week", "rewards_started", "history_badges_waiting", "habit_age_seen", "habit_age_seen_day",

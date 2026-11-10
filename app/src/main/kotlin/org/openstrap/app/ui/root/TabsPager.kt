@@ -85,6 +85,8 @@ fun tabItems(): List<NavItem> = Tab.entries.map { tab ->
 }
 
 /** The day shown as every tab and detail sees it: the debug previews applied, its Recovery, strap score and check-in. */
+// One field per part of the day the screens show.
+@Suppress("LongParameterList")
 class ShownDay(
     val day: DayUiState,
     val recovery: RecoveryResult?,

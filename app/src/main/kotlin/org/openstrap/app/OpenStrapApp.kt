@@ -53,7 +53,9 @@ class AppContainer(val app: Application) {
         scope = appScope,
     )
     /** Saved and the Keep recording notice, from the session's state, on the app scope (audit S10). */
-    val workoutNotifier = org.openstrap.app.device.WorkoutNotifier(app, workout.state, { database.healthDao().appWorkoutOnce(it) }, appScope)
+    val workoutNotifier = org.openstrap.app.device.WorkoutNotifier(
+        app, workout.state, { database.healthDao().appWorkoutOnce(it) }, appScope,
+    )
     val updater = org.openstrap.app.update.AppUpdater(
         app, settings, recording = { workout.state.value is org.openstrap.app.device.WorkoutState.Recording }, scope = appScope,
     )

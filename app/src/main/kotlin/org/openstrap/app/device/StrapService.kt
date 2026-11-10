@@ -227,9 +227,11 @@ class StrapService : LifecycleService() {
      */
     private fun syncSticky(workout: WorkoutSession) {
         val s = workout.state.value
-        if (sticky && workout.restored.value && s !is WorkoutState.Recording && s !is WorkoutState.Ended) {
+        val idle = workout.restored.value && s !is WorkoutState.Recording && s !is WorkoutState.Ended
+        if (sticky && idle) {
             sticky = false
-            catching { start(this) }
+            // Android may refuse the start now; the answer then stays sticky until the next start.
+            runCatching { start(this) }
         }
     }
 

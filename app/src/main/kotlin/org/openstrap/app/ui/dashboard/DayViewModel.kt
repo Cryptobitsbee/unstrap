@@ -237,10 +237,15 @@ data class ActivityHistory(
     }
 }
 
+/** How long synced data must settle before the day's scores are worked out again. */
+private const val CHANGES_SETTLE_MS = 800L
+
 @OptIn(ExperimentalCoroutinesApi::class)
+// One flow per part of the day's screen state, plus the day picking.
+@Suppress("TooManyFunctions")
 class DayViewModel(
     private val repo: DayRepository,
-    profile: Flow<UserProfile> = flowOf(UserProfile()),
+    private val profile: Flow<UserProfile> = flowOf(UserProfile()),
     /** A sleep or nap (by the strap's start) was moved, deleted or restored: Health Connect is written again. */
     private val onSleepEdited: (Long) -> Unit = {},
     /** The clock today is read from, asked afresh each time. Tests pass one they move by hand. */
@@ -328,7 +333,7 @@ class DayViewModel(
      */
     @OptIn(FlowPreview::class)
     private fun recoveryState(date: LocalDate): Flow<RecoveryState> = recoveryRetries.flatMapLatest {
-        combine(profile, repo.changes().debounce(800)) { p, _ -> p }
+        combine(profile, repo.changes().debounce(CHANGES_SETTLE_MS)) { p, _ -> p }
             .mapLatest { p ->
                 withContext(work) {
                     // mapLatest cancels this when newer data arrives. That's not a failure, and catching lets it through.
@@ -379,7 +384,7 @@ class DayViewModel(
     /** The weekly Healthspan estimate for [d], or why it's withheld; null while loading or on failure. */
     @OptIn(FlowPreview::class)
     private fun healthspanOf(d: LocalDate): Flow<org.openstrap.app.data.Healthspan.Outcome?> =
-        combine(profile, repo.changes().debounce(800)) { p, _ -> p }
+        combine(profile, repo.changes().debounce(CHANGES_SETTLE_MS)) { p, _ -> p }
             .mapLatest { p ->
                 withContext(work) {
                     catching { repo.healthspan(d, p) }.onFailure { Log.w("unstrap", "healthspan failed", it) }.getOrNull()
