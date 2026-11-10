@@ -556,6 +556,14 @@ class StrapManager(
             s.messagesFor(Endpoints.REALTIME_ACTIVITY).collect { p ->
                 val totals = RealtimeSteps.parseMessage(p)
                 if (totals == null) log("steps < ${p.toHex()}")
+                // Zepp's `yt00` on a step push (`mgk`): in the background with no phone workout, notify goes off, so a
+                // workout that ended behind the app doesn't leave the strap pushing steps.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (StepsNotify.offOnPush(p, appVisible, workoutActive, now - stepsOffAt)) {
+                    stepsOffAt = now
+                    log("steps: push in the background, notify off")
+                    stepsNotify(s, on = false)
+                }
                 totals?.let {
                     if (todaySteps.value?.isPlausible != it.isPlausible) {
                         log("steps today=${it.steps} dist=${it.distanceMeters} kcal=${it.calories}" + if (!it.isPlausible) " (total doesn't match distance: counting from synced history)" else "")
@@ -679,6 +687,9 @@ class StrapManager(
     @Volatile private var workoutActive = false
     private var stepsJob: kotlinx.coroutines.Job? = null
 
+    /** When a step push last turned notify off, for Zepp's 1.5 s per-state debounce. */
+    private var stepsOffAt = Long.MIN_VALUE / 2
+
     override fun setWorkoutActive(active: Boolean) {
         workoutActive = active
         live.setWorkoutActive(active)
@@ -781,9 +792,25 @@ class StrapManager(
     private companion object {
         const val MTU_PUSH = 0x02
         const val STEPS_NOTIFY_REPLY = 0x06
-        const val STEPS_DEBOUNCE_MS = 1_500L
+        const val STEPS_DEBOUNCE_MS = StepsNotify.DEBOUNCE_MS
         const val BATTERY_RETRY_MS = 2_000L
         const val SENT_PROFILE = "profile_crc"
         const val SENT_CALORIE_GOAL = "calorie_goal"
+    }
+}
+
+/** Zepp's RealtimeStepService (`yt00`) rule for a step push, kept apart so it can be tested. */
+internal object StepsNotify {
+    /** Zepp's debounce per notify state (`yt00.j`). */
+    const val DEBOUNCE_MS = 1_500L
+    private const val PUSH = 0x07
+
+    /**
+     * Whether a message on 0x0016 is a step push (`07`) that turns notify off, as Zepp does on its `mgk` event: the app
+     * behind, no phone workout recording, and no off sent in the last [DEBOUNCE_MS].
+     */
+    fun offOnPush(payload: ByteArray, appVisible: Boolean, workoutActive: Boolean, sinceLastOffMs: Long): Boolean {
+        if (payload.isEmpty() || payload.u8(0) != PUSH) return false
+        return !appVisible && !workoutActive && sinceLastOffMs >= DEBOUNCE_MS
     }
 }
