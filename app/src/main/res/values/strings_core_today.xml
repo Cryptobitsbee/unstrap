@@ -256,6 +256,8 @@
     <string name="core_today_heart_live">Live now</string>
     <!-- The heart rate card's line: when the reading shown was taken, "20:52". Short. -->
     <string name="core_today_heart_at">At <xliff:g id="time" example="20:52">%1$s</xliff:g></string>
+    <!-- Under the heart rate number while the line is held: the point is an average of a few minutes. -->
+    <string name="core_today_heart_average_from"><xliff:g id="minutes" example="10">%1$d</xliff:g> min average from <xliff:g id="time" example="20:52">%2$s</xliff:g></string>
     <!-- The heart rate card's line before any reading. Short. -->
     <string name="core_today_heart_waiting">Waiting for the strap</string>
 </resources>

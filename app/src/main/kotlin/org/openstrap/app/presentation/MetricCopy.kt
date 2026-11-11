@@ -14,7 +14,7 @@ import java.util.Locale
 enum class Metric(@StringRes private val titleId: Int, @StringRes private val unitId: Int, val decimals: Int, val daily: DailyMetric) {
     HeartRate(R.string.core_metric_heart_rate, R.string.core_unit_bpm, 0, DailyMetric.HeartRate),
     RestingHr(R.string.core_metric_resting_hr, R.string.core_unit_bpm, 0, DailyMetric.RestingHr),
-    Hrv(R.string.core_metric_hrv, R.string.core_unit_ms, 0, DailyMetric.Hrv),
+    Hrv(R.string.core_metric_hrv, R.string.core_unit_ms, 0, DailyMetric.SleepHrv),
     Spo2(R.string.core_metric_spo2, 0, 0, DailyMetric.Spo2),
     Stress(R.string.core_metric_stress, 0, 0, DailyMetric.Stress),
     SkinTemperature(R.string.core_metric_skin_temperature, R.string.core_unit_celsius, 1, DailyMetric.SkinTemperature),

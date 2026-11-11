@@ -391,7 +391,7 @@ private fun ScoreRelated(score: Score, state: DayUiState, r: RecoveryResult?, hi
             stringResource(if (asleep == null) R.string.glow_recovery_no_sleep else R.string.glow_recovery_asleep),
             onClick = { onOpen(Detail.OfScore(Score.Sleep)) }, icon = Score.Sleep.rowIcon(),
         )
-        metrics.forEach { m -> RelatedMetricRow(m, state, history, divider = true, onOpen) }
+        metrics.forEach { m -> RelatedMetricRow(m, state, history, divider = true, onOpen, nightScoped = true) }
     }
 }
 

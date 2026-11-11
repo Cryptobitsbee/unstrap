@@ -20,6 +20,7 @@
     <string name="day_sleep_heart_week">过去 7 晚睡眠平均 %1$d bpm，范围 %2$d 至 %3$d。</string>
     <string name="day_sleep_score_label_last_night">昨晚</string>
     <string name="day_sleep_score_label_that_night">当晚</string>
+    <string name="day_sleep_score_label_adjusted">%1$s，已调整</string>
     <string name="day_sleep_no_score">暂无分数</string>
     <string name="day_sleep_no_score_last_night">手环未对昨晚睡眠评分</string>
     <string name="day_sleep_no_score_that_night">手环未对当晚睡眠评分</string>

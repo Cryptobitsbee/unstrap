@@ -143,6 +143,24 @@ class DayViewModelUiStateTest {
         assertEquals(listOf(ChartPoint(at(12), 45f)), s.hrv)
     }
 
+    @Test fun `the day's lowest and highest come from the minutes, the strap's maximum when higher`() {
+        // A one-minute dip and spike inside two 5-minute buckets that average them away.
+        val hr = (0 until 10).map { HeartRateSample(at(10) + it * 60L, if (it == 3) 44 else if (it == 6) 151 else 70) }
+        val s = DayViewModel.toUiState(DayData(date, heartRate = hr))
+        assertEquals(hr.map { it.timestamp to it.bpm }, s.heartMinutes)
+        assertEquals(listOf(65f, 86f), s.heartRate.map { it.y })
+        assertEquals(44 to 151, s.heartRateRange)
+        assertEquals(44 to 163, DayViewModel.toUiState(DayData(date, heartRate = hr, dailyMaxHeartRate = 163)).heartRateRange)
+        assertEquals(44 to 151, DayViewModel.toUiState(DayData(date, heartRate = hr, dailyMaxHeartRate = 120)).heartRateRange)
+        assertNull(DayViewModel.toUiState(DayData(date)).heartRateRange)
+    }
+
+    @Test fun `the night's stored readings are kept for its lowest`() {
+        val night = listOf(HeartRateSample(at(2), 52), HeartRateSample(at(2, 1), 46), HeartRateSample(at(2, 2), 55))
+        val s = DayViewModel.toUiState(DayData(date, nightHeartRate = night))
+        assertEquals(night.map { it.timestamp to it.bpm }, s.sleepHeartMinutes)
+    }
+
     @Test fun `the Activity screens get the day's Heart points and energy as state`() = runTest {
         val repo = FakeDays()
         val clock = FixedClock(Instant.parse("2026-01-15T12:00:00Z"))

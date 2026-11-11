@@ -159,7 +159,7 @@ data class SpO2Reading(
     val isAuto: Boolean,
     val history: List<Int>?,
 ) : HistoryRecord {
-    /** The app keeps only 80..100 (02 §3.5). */
+    /** Zepp 10.10.5 keeps only 80..100 and drops the rest before storing (`d/eo00.java:158`); 127 is the invalid marker. */
     val isPlausible: Boolean get() = spo2 in 80..100
 }
 

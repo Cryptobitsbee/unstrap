@@ -34,6 +34,7 @@ import java.time.format.TextStyle as DayStyle
 import java.util.Locale
 import kotlin.math.roundToInt
 import org.openstrap.app.presentation.AFTER_FIRST_NIGHT
+import org.openstrap.app.presentation.DetailCopy
 import org.openstrap.app.presentation.Metric
 import org.openstrap.app.presentation.TodayCopy
 
@@ -52,8 +53,10 @@ internal class NightVital(
 
 /**
  * The six night vitals the Sleep tab lists (spec 5.2), always all six, in order: lowest heart rate, HRV, breathing
- * rate, blood oxygen, skin temperature (as its change from your normal once there is one) and average heart rate.
+ * rate, blood oxygen, skin temperature (its level, with the signed change from your normal under it once there is one) and
+ * average heart rate.
  * HRV, breathing, blood oxygen and skin temperature are read against your previous nights once there are a week of them.
+ * Blood oxygen's line says it is the night average, and skin temperature's its change from your normal.
  */
 internal fun nightVitals(state: DayUiState, firstNights: Boolean = false, strings: Strings = Strings.app): List<NightVital> {
     val session = state.sleep
@@ -63,11 +66,14 @@ internal fun nightVitals(state: DayUiState, firstNights: Boolean = false, string
         else -> strings.get(R.string.day_sleep_vital_no_reading)
     }
     // The same value and normal the night-scoped detail shows ([SleepCopy]).
-    fun against(metric: Metric, label: String, color: Color, show: (Float, History.Normal?) -> String): NightVital {
+    fun against(
+        metric: Metric, label: String, color: Color, second: (Float, History.Normal?) -> String? = { _, _ -> null },
+        show: (Float, History.Normal?) -> String,
+    ): NightVital {
         val v = SleepCopy.nightValue(state, metric) ?: return NightVital(metric, label, color, null, missing)
         val n = SleepCopy.nightNormal(state, metric)
         val direction = History.status(v, n)
-        val status = SleepCopy.learning(state, metric, strings) ?: TodayCopy.normalWord(direction)
+        val status = second(v, n) ?: SleepCopy.learning(state, metric, strings) ?: TodayCopy.normalWord(direction)
         return NightVital(metric, label, color, show(v, n), status, direction.takeIf { n != null })
     }
     val lowest = SleepCopy.lowestHeart(state)
@@ -81,11 +87,16 @@ internal fun nightVitals(state: DayUiState, firstNights: Boolean = false, string
         against(Metric.Breathing, strings.get(R.string.day_info_breathing_name), MetricColors.sleepLight) { v, _ ->
             Metric.Breathing.format(v)
         },
-        against(Metric.Spo2, strings.get(R.string.day_info_spo2_name), MetricColors.spo2) { v, _ -> "${v.roundToInt()}%" },
-        // Skin temperature means little on its own; once there's a normal, show how far off it is.
-        against(Metric.SkinTemperature, strings.get(R.string.day_info_skin_temp_name), MetricColors.temperature) { v, n ->
-            n?.let { Metric.SkinTemperature.formatChange(v - it.mean) } ?: Metric.SkinTemperature.format(v)
-        },
+        // Blood oxygen is read all day too, so its row says this is the night's average.
+        against(
+            Metric.Spo2, strings.get(R.string.day_info_spo2_name), MetricColors.spo2,
+            second = { _, _ -> strings.get(R.string.glow_today_spo2_night_average) },
+        ) { v, _ -> "${v.roundToInt()}%" },
+        // The night's average level, with how far it is from your normal under it once there is one.
+        against(
+            Metric.SkinTemperature, strings.get(R.string.day_info_skin_temp_name), MetricColors.temperature,
+            second = { v, n -> n?.let { DetailCopy.changeWithUnit(Metric.SkinTemperature, v - it.mean) } },
+        ) { v, _ -> Metric.SkinTemperature.format(v) },
         NightVital(
             Metric.HeartRate, strings.get(R.string.day_sleep_vital_average_heart), MetricColors.heart, average?.toString(),
             if (average != null) strings.get(R.string.day_sleep_vital_while_asleep) else missing,

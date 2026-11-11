@@ -4,7 +4,6 @@ import org.openstrap.app.data.DayStat
 import org.openstrap.app.data.Healthspan
 import org.openstrap.app.data.History
 import org.openstrap.app.data.RecoveryResult
-import org.openstrap.app.presentation.ChartPoint
 import org.openstrap.app.presentation.LoadBand
 import org.openstrap.app.presentation.LoadBands
 import java.time.Instant
@@ -91,9 +90,3 @@ fun habitAgeOffStatus(outcome: Healthspan.Outcome?): OffStatus {
         else -> OffStatus.Usual
     }
 }
-
-/** The day's mean stress from its [samples], null without any: the value Stress' daily history keeps. */
-fun stressMean(samples: List<ChartPoint>): Float? = samples.takeIf { it.isNotEmpty() }?.map { it.y }?.average()?.toFloat()
-
-/** The day's stress ([stressMean] of [samples]) against your normal (`rememberNormal(Metric.Stress)`). */
-fun stressOffStatus(samples: List<ChartPoint>, normal: History.Normal?): OffStatus = offStatus(stressMean(samples), normal)

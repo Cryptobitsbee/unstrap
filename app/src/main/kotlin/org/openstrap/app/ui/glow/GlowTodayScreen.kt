@@ -50,6 +50,7 @@ import org.openstrap.app.ui.components.HapticEvent
 import org.openstrap.app.ui.components.rememberHaptics
 import org.openstrap.app.ui.dashboard.DailyHistory
 import org.openstrap.app.ui.dashboard.DayUiState
+import org.openstrap.app.ui.dashboard.LatestReading
 import org.openstrap.app.ui.dashboard.SleepCopy
 import org.openstrap.app.ui.dashboard.Tier
 import org.openstrap.app.ui.dashboard.lookOr
@@ -785,16 +786,25 @@ private fun TodayRow(
                 BodyRow(
                     stringResource(R.string.glow_today_resting_hr), MetricColors.heart, s.restingHeartRate?.toFloat(),
                     normal(Metric.RestingHr), "", Metric.RestingHr,
+                    source = if (s.restingEstimated) BodyValue.Estimated else BodyValue.Plain,
                 ),
                 // Night signals: last night's against the nights before, as the Sleep tab and their details read them.
                 BodyRow(
                     stringResource(R.string.glow_today_hrv), MetricColors.hrv, SleepCopy.nightValue(s, Metric.Hrv),
                     SleepCopy.nightNormal(s, Metric.Hrv), "", Metric.Hrv, SleepCopy.learning(s, Metric.Hrv),
                 ),
-                BodyRow(
-                    stringResource(R.string.glow_today_blood_oxygen), MetricColors.spo2, SleepCopy.nightValue(s, Metric.Spo2),
-                    SleepCopy.nightNormal(s, Metric.Spo2), "%", Metric.Spo2, SleepCopy.learning(s, Metric.Spo2),
-                ),
+                // Blood oxygen leads with the day's latest reading, said as daytime or asleep, with its time once an hour
+                // old. A single reading has no normal, so the row has no tag; the night's average, with its tag, is
+                // on the Sleep and Recovery tabs.
+                LatestReading.spo2(s).let { latest ->
+                    BodyRow(
+                        stringResource(R.string.glow_today_blood_oxygen), MetricColors.spo2, latest?.y,
+                        null, "%", Metric.Spo2,
+                        source = BodyValue.Latest(
+                            latest?.let { LatestReading.spo2Line(it.x, LatestReading.sleepWindow(s), ctx.now, time = ::clock) }.orEmpty(),
+                        ),
+                    )
+                },
                 BodyRow(
                     stringResource(R.string.glow_today_breathing_rate), MetricColors.sleepLight, SleepCopy.nightValue(s, Metric.Breathing),
                     SleepCopy.nightNormal(s, Metric.Breathing), "", Metric.Breathing, SleepCopy.learning(s, Metric.Breathing),
@@ -807,12 +817,11 @@ private fun TodayRow(
             else LastNightCard(s, ctx.firstNights, onOpenSleep, modifier, stuck = ctx.stuck, size = size)
         // A live reading is never stale.
         TodayCard.HeartRate -> HeartDayCard(
-            s, ctx.live, size, { onOpenMetric(Metric.HeartRate) }, modifier, restingRange = ctx.restingRange, normal = normal(Metric.HeartRate),
+            s, ctx.live, size, { onOpenMetric(Metric.HeartRate) }, modifier, restingRange = ctx.restingRange,
             upTo = if (ctx.live == null) ctx.upTo(s.heartRate.lastOrNull()?.x) else null,
         )
         TodayCard.Stress -> StressDayCard(
-            s, size, normal(Metric.Stress), ctx.waiting, { onOpenMetric(Metric.Stress) }, modifier,
-            upTo = ctx.upTo(s.stress.lastOrNull()?.x),
+            s, size, ctx.waiting, { onOpenMetric(Metric.Stress) }, modifier, now = ctx.now,
         )
         // Steps come in the same records as the rest of the day, so the day's newest reading is how far they go. The
         // count stays in dots in the evening too, under the hero's: the goal tag needs a number to sit by (spec 2.5).

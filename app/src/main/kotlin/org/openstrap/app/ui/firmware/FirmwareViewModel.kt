@@ -279,9 +279,8 @@ class FirmwareViewModel(
         const val MIN_BATTERY = 30
 
         /**
-         * Off for now: since firmware 3.27.0.1 the strap's own sleep result is empty or wrong on nights it was worn
-         * (2026-11-07), so no more strap updates until that is understood. The Strap page shows the version without
-         * opening this page, and [install] refuses.
+         * Off for now (since 2026-11-07). The Strap page shows the version without opening this page, and [install]
+         * refuses.
          */
         const val UPDATES_ENABLED = false
     }

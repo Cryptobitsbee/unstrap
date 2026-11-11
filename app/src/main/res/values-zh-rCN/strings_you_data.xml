@@ -57,8 +57,8 @@
     <string name="you_hc_restore_note">找回 unstrap 曾保存在那里的数据</string>
     <string name="you_hc_open">打开 Health Connect</string>
     <string name="you_hc_open_note">权限与数据</string>
-    <string name="you_hc_calories_note">允许后才会复制卡路里。</string>
-    <string name="you_hc_calories_offer">再次请求卡路里权限</string>
+    <string name="you_hc_calories_note">允许后才会复制卡路里、呼吸频率和最大摄氧量。</string>
+    <string name="you_hc_calories_offer">再次请求</string>
     <string name="you_hc_install">安装 Health Connect</string>
     <string name="you_hc_install_note">在此手机上 Health Connect 是来自 Play 商店的应用。请安装它以便将数据复制到其中。</string>
     <string name="you_hc_store_failed">无法打开 Play 商店。</string>

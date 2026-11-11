@@ -2,6 +2,7 @@
 <resources>
     <string name="glow_sleep_breathing_title">呼吸紊乱</string>
     <string name="glow_sleep_last_night">昨晚</string>
+    <string name="glow_sleep_score_adjusted">%1$s，已调整</string>
     <string name="glow_sleep_restore">恢复</string>
     <string name="glow_sleep_stage_span">%1$s，%2$s，%3$d 分钟</string>
     <string name="glow_sleep_vitals_title">夜间体征</string>

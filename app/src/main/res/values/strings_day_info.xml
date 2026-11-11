@@ -57,42 +57,42 @@
     <!-- Resting heart rate's sheet. -->
     <string name="day_info_resting_hr_name">Resting heart rate</string>
     <string name="day_info_resting_hr_meaning">Your heart rate at its calmest. Lower usually means a fitter, well rested heart.</string>
-    <string name="day_info_resting_hr_how">The strap calculates it each day from your calmest stretch, usually in sleep. Your normal is the middle of your last 30 days, give or take a usual spread, once 7 of them have a value.</string>
+    <string name="day_info_resting_hr_how">Normally it\'s the strap\'s own figure for the day, from your calmest stretch, usually in sleep. When the strap sent none, unstrap estimates it from the calmest half hour of the day, and says so. Your normal is the middle of your last 30 days, give or take a usual spread, once 7 of them have a value.</string>
     <string name="day_info_resting_hr_moves">It rises after hard training, late meals, alcohol, poor sleep or when your body is fighting something off, and falls as fitness builds.</string>
     <string name="day_info_resting_hr_off">A night with the strap loose or off gives it less to go on. One high day says less than a few in a row.</string>
 
     <!-- Heart rate variability's sheet. HRV is the short name shown on cards. -->
     <string name="day_info_hrv_name">HRV</string>
     <string name="day_info_hrv_meaning">Heart rate variability, the small changes in time between heartbeats. Higher than your normal often means your body is well recovered.</string>
-    <string name="day_info_hrv_how">The strap measures the time between beats, in milliseconds (ms), while you\'re still, mostly in sleep, and the day\'s value is the average of its readings. It\'s read against your own normal: the middle of your last 30 days, give or take a usual spread.</string>
+    <string name="day_info_hrv_how">The strap measures the time between beats, in milliseconds (ms), while you\'re still, mostly in sleep. The figure is the average of its readings through your sleep, to the nearest ms. It\'s read against your own normal: the middle of your last 30 days, give or take a usual spread.</string>
     <string name="day_info_hrv_moves">Good sleep and rest raise it. Stress, hard training and alcohol lower it. Compare it with your own normal, not other people\'s.</string>
     <string name="day_info_hrv_off">Moving during a reading, a loose strap or a short night leave fewer clean readings. HRV swings a lot from day to day, so a few days in a row say more than one.</string>
 
     <!-- Blood oxygen's sheet. -->
     <string name="day_info_spo2_name">Blood oxygen</string>
     <string name="day_info_spo2_meaning">How much of your blood\'s capacity is carrying oxygen. Most people sit at 95 to 100%%.</string>
-    <string name="day_info_spo2_how">The strap shines red and infrared light through the skin and compares how much of each comes back. The day\'s value is the average of its readings.</string>
+    <string name="day_info_spo2_how">The strap shines red and infrared light through the skin and compares how much of each comes back. It reads through the day and night, and the number is the latest reading. The Sleep and Recovery tabs show the average while you slept.</string>
     <string name="day_info_spo2_moves">Altitude and pauses in breathing during sleep can lower it.</string>
     <string name="day_info_spo2_off">A loose strap, cold skin or moving during a reading can give low values. It\'s a wellness reading, not a medical one.</string>
 
     <!-- Stress's sheet. -->
     <string name="day_info_stress_name">Stress</string>
     <string name="day_info_stress_meaning">The strap\'s stress level from 0 to 100. Higher means your body is more on alert.</string>
-    <string name="day_info_stress_how">The strap calculates it from your heart rate and its variability while you\'re still. Readings during and just after a workout are left out, since exercise isn\'t stress.</string>
+    <string name="day_info_stress_how">The strap calculates it from your heart rate and its variability while you\'re still. The number is the latest reading, and the day\'s average is what is compared with your usual. Readings during and just after a workout are left out, since exercise isn\'t stress.</string>
     <string name="day_info_stress_moves">Pressure, caffeine and too little sleep raise it. Calm breathing, rest and time outdoors bring it down.</string>
     <string name="day_info_stress_off">Excitement, heat and an illness look like stress to the strap. Small movements while sitting can push it up.</string>
 
     <!-- Skin temperature's sheet. -->
     <string name="day_info_skin_temp_name">Skin temperature</string>
-    <string name="day_info_skin_temp_meaning">The temperature of your skin under the strap. What matters is the change from your normal, not the level.</string>
-    <string name="day_info_skin_temp_how">The strap measures it against your skin. The level depends on fit and the room, so unstrap shows it as a change from your normal of the last 30 days.</string>
+    <string name="day_info_skin_temp_meaning">The temperature of your skin under the strap. What to watch is the change from your normal, more than the level.</string>
+    <string name="day_info_skin_temp_how">The strap measures it against your skin. The number is the average through your sleep. The level depends on fit and the room, so unstrap shows the change from your normal of the last 30 days with it.</string>
     <string name="day_info_skin_temp_moves">It moves with alcohol, a warm room, hard training, the menstrual cycle, or when your body is fighting something off.</string>
     <string name="day_info_skin_temp_off">A warm bed, a heavy duvet or the strap sitting loose all change it without your body changing.</string>
 
     <!-- Breathing rate's sheet. -->
     <string name="day_info_breathing_name">Breathing rate</string>
     <string name="day_info_breathing_meaning">How many breaths you take a minute while asleep. It stays very steady for most people.</string>
-    <string name="day_info_breathing_how">The strap measures it during sleep, so there\'s one value a night, read against your normal of the last 30 days.</string>
+    <string name="day_info_breathing_how">The strap measures it through your sleep, and the figure is the average of those readings, read against your normal of the last 30 days.</string>
     <string name="day_info_breathing_moves">It can rise above your normal after a hard training day, in a warm, stuffy room, or when your body is fighting something off.</string>
     <string name="day_info_breathing_off">A restless night, or the strap off for part of it, leaves fewer readings to go on.</string>
 
@@ -215,7 +215,7 @@
     <!-- Added to a night vital's How row when it's opened from the Sleep tab: heart rate. Month and Year are the detail's ranges. -->
     <string name="day_info_night_heart_rate">Opened from the night, it shows only your sleep: the line from falling asleep to waking, the lowest while asleep and the strap\'s average for the night. Month and Year are whole days.</string>
     <!-- The same for blood oxygen. -->
-    <string name="day_info_night_spo2">Opened from the night, it shows the strap\'s readings in sleep, kept apart from the spot readings in the day, against your earlier nights.</string>
+    <string name="day_info_night_spo2">Opened from the night, it shows the strap\'s readings in sleep, kept apart from the readings in the day, against your earlier nights.</string>
     <!-- The same for breathing rate. -->
     <string name="day_info_night_breathing">Opened from the night, it\'s that night\'s readings, against your earlier nights.</string>
     <!-- The same for HRV and skin temperature. -->

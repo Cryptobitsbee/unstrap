@@ -138,7 +138,7 @@ class RoomDayRepository(
             SleepNight(
                 date = d,
                 session = s,
-                hrv = during(hrv, { it.timestamp }, { it.milliseconds.toFloat() }),
+                hrv = s?.let { NightMetrics.sleepHrv(hrv, it.start, it.end) },
                 skinTemperature = during(skin, { it.timestamp }, { it.celsius }),
                 spo2 = during(spo2, { it.timestamp }, { it.percent.toFloat() }),
                 breathing = during(breath, { it.timestamp }, { it.perMinute.toFloat() }),

@@ -261,7 +261,7 @@ class AppRootViewModel(
         catching { rewards.summary(start, workouts.value, goals.value.workoutsPerWeek) }.getOrNull()
 
     /**
-     * The manual copy and auto sync write with these. Only the needed permissions decide: the calorie ones are asked
+     * The manual copy and auto sync write with these. Only the needed permissions decide: the optional ones are asked
      * for in the same screen when the needed ones are missing, and never again by themselves.
      */
     suspend fun healthConnectWrite(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
@@ -269,10 +269,10 @@ class AppRootViewModel(
         else -> HcState.Needs(healthConnect.requestedPermissions)
     }
 
-    /** Just the calorie permissions, for the Health Connect page's "Offer calories again". Granted when nothing is left to ask. */
-    suspend fun healthConnectCalories(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
-        healthConnect.hasCaloriePermissions() -> HcState.Granted
-        else -> HcState.Needs(healthConnect.caloriePermissions)
+    /** Just the optional permissions, for the Health Connect page's offer to ask again. Granted when nothing is left to ask. */
+    suspend fun healthConnectOptional(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
+        healthConnect.hasOptionalPermissions() -> HcState.Granted
+        else -> HcState.Needs(healthConnect.optionalPermissions)
     }
 
     suspend fun healthConnectRead(): HcState = HcState.blocked(healthConnect.availability()) ?: when {

@@ -61,3 +61,39 @@ class BucketTest {
         assertEquals(listOf(0L to 70, 300L to 90), Summaries.bucketAverage(s))
     }
 }
+
+class HeartRangeTest {
+    // One reading a minute with a single dip and a single spike that 5-minute averages would flatten.
+    private val series = (0 until 10).map { i -> i * 60L to if (i == 3) 44 else if (i == 6) 151 else 70 }
+
+    @Test
+    fun theDayRangeIsTheStoredLowestAndHighest() {
+        assertEquals(44 to 151, HeartReadings.heartRange(series, null))
+        // Averaged into one 5-minute bucket the same minutes read much narrower.
+        assertEquals(listOf(0L to 65, 300L to 86), Summaries.bucketAverage(series))
+    }
+
+    @Test
+    fun theStrapsOwnMaximumLeadsOnlyWhenHigher() {
+        assertEquals(44 to 163, HeartReadings.heartRange(series, 163))
+        assertEquals(44 to 151, HeartReadings.heartRange(series, 120))
+        // A reading outside what a heart can be is not taken as a maximum.
+        assertEquals(44 to 151, HeartReadings.heartRange(series, 255))
+        assertNull(HeartReadings.heartRange(emptyList(), 163))
+    }
+
+    @Test
+    fun lowestIsTheEarliestOfTheLowestAndMeanIsRounded() {
+        assertEquals(60L to 44, HeartReadings.lowest(listOf(0L to 70, 60L to 44, 120L to 44)))
+        assertNull(HeartReadings.lowest(emptyList()))
+        assertEquals(52, HeartReadings.mean(listOf(0L to 51, 60L to 52)))
+        assertEquals(51, HeartReadings.mean(listOf(0L to 51, 60L to 51, 120L to 52)))
+        assertNull(HeartReadings.mean(emptyList()))
+    }
+
+    @Test
+    fun withinKeepsTheReadingsInsideBothEnds() {
+        assertEquals(listOf(60L to 70, 120L to 70), HeartReadings.within(series, 60, 120))
+        assertEquals(listOf(60L to 70, 120L to 70, 180L to 44), HeartReadings.within(series, 60, 180))
+    }
+}

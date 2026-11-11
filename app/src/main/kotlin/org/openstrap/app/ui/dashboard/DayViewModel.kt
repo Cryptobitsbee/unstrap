@@ -32,6 +32,7 @@ import org.openstrap.app.data.DayValue
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.data.SleepEdits
 import org.openstrap.app.data.SleepHistory
+import org.openstrap.app.data.HeartReadings
 import org.openstrap.app.data.Summaries
 import org.openstrap.app.data.Today
 import org.openstrap.app.data.catching
@@ -69,6 +70,11 @@ data class DayUiState(
     val hourlySteps: List<Float> = List(24) { 0f },
     val activeHours: Int = 0,
     val heartRate: List<ChartPoint> = emptyList(),
+    /**
+     * The day's stored heart rate readings, one a minute (time, bpm): what its lowest and
+     * highest come from, not [heartRate]'s averages.
+     */
+    val heartMinutes: List<Pair<Long, Int>> = emptyList(),
     val latestHeartRate: Int? = null,
     val restingHeartRate: Int? = null,
     /** True when [restingHeartRate] is our own estimate rather than the strap's value. */
@@ -123,6 +129,8 @@ data class DayUiState(
     val nights: List<SleepNight> = emptyList(),
     /** Heart rate across the night window (5-minute averages), so sleep before midnight is included. */
     val sleepHeartRate: List<ChartPoint> = emptyList(),
+    /** The night window's stored heart rate readings, one a minute (time, bpm), for the night's lowest. */
+    val sleepHeartMinutes: List<Pair<Long, Int>> = emptyList(),
     /** HRV and skin temperature read during the night's main sleep, before midnight too, for the night-scoped details. */
     val sleepHrv: List<ChartPoint> = emptyList(),
     val sleepSkinTemperature: List<ChartPoint> = emptyList(),
@@ -139,6 +147,20 @@ data class DayUiState(
 ) {
     /** From the stages, else the session's own count: a night without stages has its awake minutes out. */
     val asleepSeconds: Long? get() = sleepBreakdown?.asleepSeconds ?: sleep?.let(org.openstrap.app.data.SleepHistory::asleepSeconds)
+
+    /**
+     * True when the Sleep score shown isn't the strap's own: the user moved the sleep's times 15 minutes or more, so
+     * unstrap adjusted the strap's score ([SleepEdits.anchored]).
+     */
+    val sleepScoreAdjusted: Boolean
+        get() = sleep != null && sleepAsDetected != null && sleep.score != null &&
+            !SleepEdits.keepsScore(sleepAsDetected, sleep.start, sleep.end)
+
+    /**
+     * The day's lowest and highest heart rate from the stored readings, the high the strap's own maximum when higher
+     * ([HeartReadings.heartRange]).
+     */
+    val heartRateRange: Pair<Int, Int>? get() = HeartReadings.heartRange(heartMinutes, dailyMaxHeartRate)
 }
 
 /** The day's Recovery couldn't be worked out. [yesterday] is yesterday's score, shown dimmed in its place, when known. */
@@ -460,6 +482,7 @@ class DayViewModel(
             val sleep = data.sleep
             val series = Summaries.heartRateSeries(data.heartRate, data.minutes)
             val hourly = Summaries.hourlySteps(data.minutes, data.day.from)
+            val nightSeries = Summaries.heartRateSeries(data.nightHeartRate, emptyList())
             return DayUiState(
                 loaded = true,
                 date = data.date,
@@ -468,6 +491,7 @@ class DayViewModel(
                 hourlySteps = hourly,
                 activeHours = Summaries.activeHours(hourly),
                 heartRate = Summaries.bucketAverage(series).map { ChartPoint(it.first, it.second.toFloat()) },
+                heartMinutes = series,
                 latestHeartRate = series.lastOrNull()?.second,
                 restingHeartRate = data.restingTrend.lastOrNull()?.value?.toInt(),
                 restingEstimated = data.restingEstimated.lastOrNull() ?: false,
@@ -501,9 +525,10 @@ class DayViewModel(
                 activeCalories = data.activeCalories,
                 alerts = data.alerts,
                 nights = data.nights,
-                sleepHeartRate = Summaries.bucketAverage(Summaries.heartRateSeries(data.nightHeartRate, emptyList())).map {
+                sleepHeartRate = Summaries.bucketAverage(nightSeries).map {
                     ChartPoint(it.first, it.second.toFloat())
                 },
+                sleepHeartMinutes = nightSeries,
                 sleepHrv = data.sleepHrv.map { ChartPoint(it.timestamp, it.milliseconds.toFloat()) },
                 sleepSkinTemperature = data.sleepSkin.map { ChartPoint(it.timestamp, it.celsius) },
                 dayStart = data.day.from,

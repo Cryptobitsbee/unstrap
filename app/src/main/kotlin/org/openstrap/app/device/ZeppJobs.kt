@@ -22,9 +22,13 @@ internal sealed interface ZeppJob {
  * Helio Strap (firmware 3.27.0.1) it gives 58, 66, 72, 1, readiness `08`, 5→6, `0C`, `06`, 73, 19, 18, 37, 38, 39, 59,
  * PAI, 56, 57, 70, 61, 74, 76, 87, 88, 78, 44 (once a day).
  *
+ * Then 46, the one job that isn't Zepp's: skin temperature by the minute, which the strap keeps and Zepp never asks
+ * for. It's the only source of the temperature itself (readiness has a score, no degrees), so it runs after Zepp's
+ * whole list, when the strap advertises it.
+ *
  * Not here because they never run on this strap: the AF group (the cloud doesn't allow it), 86 and the dynamic
  * readiness score (no handler), BioCharge (no 0x0051), 2 (config flag off), 96 (not advertised), the HLD, BP and
- * weight types. Zepp never fetches 46, 43 or 7 from it.
+ * weight types. Zepp never fetches 43 or 7 from it either.
  */
 internal object ZeppJobs {
     /**
@@ -76,6 +80,8 @@ internal object ZeppJobs {
         if (g.bit(68, 74)) gdsp(74)
         for (code in listOf(76, 87, 88, 78)) if (g.mapped(code)) gdsp(code)
         if (g.bit(40, 44) && g.statisticsDue) gdsp(44)
+        // Not Zepp's: skin temperature, after everything of Zepp's.
+        if (g.mapped(46)) gdsp(46)
     }
 
     /** A sync on demand (a data-available push) runs only the GDSP jobs of [codes], in the same order. */

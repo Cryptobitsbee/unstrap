@@ -129,7 +129,7 @@ private fun ListNote(note: String, onNote: (() -> Unit)?) {
  * A row in a [ListPanel]: the metric's [icon] in its ink [color] (or in [iconTint], as a workout's sport in white), the
  * [name] with its [status] under it, the [value] in dot-matrix digits in its own column on the right, and the tap caret
  * when [onClick] opens something (spec 2.5, Grouped list). Name and value stay white, the status Secondary. Off your
- * normal, [tag] takes the status's place as a news tag ([NewsPill]), and a row has no rim. A null [value] is a waiting row: a dim dash, the icon at 30%, and [status] says what it waits for ("After
+ * normal, [tag] sits after the [status] on its line as a news tag ([NewsPill]), and a row has no rim. A null [value] is a waiting row: a dim dash, the icon at 30%, and [status] says what it waits for ("After
  * your first night"). A row that isn't a metric passes no icon. [divider] draws the hairline above the row.
  */
 @Composable
@@ -139,7 +139,7 @@ fun ListRow(
     value: String?,
     status: String?,
     modifier: Modifier = Modifier,
-    /** Off your normal: the off tag in place of [status] (spec 2.5, Tags). */
+    /** Off your normal: the off tag after [status] on its line, the line giving way to it (spec 2.5, Tags). */
     tag: org.openstrap.app.ui.dashboard.NewsTag? = null,
     onClick: (() -> Unit)? = null,
     divider: Boolean = true,
@@ -176,12 +176,7 @@ fun ListRow(
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             RowName(name)
-            if (tag != null && !waiting) NewsPill(tag)
-            else if (status != null) Text(
-                status,
-                color = if (waiting) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.6f),
-                style = GlowType.secondary,
-            )
+            RowLine(status, tag.takeIf { !waiting }, waiting)
         }
         Spacer(Modifier.width(12.dp))
         if (value != null) CompositionLocalProvider(LocalCardNumbers provides opening?.numbers) {
@@ -192,6 +187,25 @@ fun ListRow(
             Spacer(Modifier.width(RowCaretGap))
             TapCaret(ROW_CARET_ALPHA)
         }
+    }
+}
+
+/** A row's second line: the [status], then the off [tag] after it, which keeps its place while the status gives way. */
+@Composable
+private fun RowLine(status: String?, tag: org.openstrap.app.ui.dashboard.NewsTag?, waiting: Boolean) {
+    if (status == null && tag == null) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (status != null) Text(
+            status,
+            Modifier.weight(1f, fill = false),
+            color = if (waiting) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.6f),
+            style = GlowType.secondary,
+            // Beside a tag the line stays on one row, the tag keeping its place.
+            maxLines = if (tag != null) 1 else Int.MAX_VALUE,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        if (status != null && tag != null) Spacer(Modifier.width(8.dp))
+        if (tag != null) NewsPill(tag)
     }
 }
 

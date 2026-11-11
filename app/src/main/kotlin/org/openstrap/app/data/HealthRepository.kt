@@ -282,6 +282,7 @@ class HealthRepository(
             DailyMetric.HeartRate -> dao.dailyHeartRate(a, b)
             DailyMetric.Steps -> dao.dailySteps(a, b)
             DailyMetric.Hrv -> dao.dailyHrv(a, b)
+            DailyMetric.SleepHrv -> dao.dailySleepHrv(a, b)
             DailyMetric.HrvSdnn -> dao.dailyHrvSdnn(a, b)
             DailyMetric.Spo2 -> dao.dailySpo2(a, b)
             DailyMetric.SleepSpo2 -> dao.dailySleepSpo2(a, b)
@@ -366,7 +367,7 @@ class HealthRepository(
 }
 
 /** Sampled metrics that have a per-day series. */
-enum class DailyMetric { HeartRate, RestingHr, Steps, Hrv, HrvSdnn, Spo2, SleepSpo2, Stress, SkinTemperature, Breathing }
+enum class DailyMetric { HeartRate, RestingHr, Steps, Hrv, SleepHrv, HrvSdnn, Spo2, SleepSpo2, Stress, SkinTemperature, Breathing }
 
 /** One local day of a metric: the average (the total, for steps), lowest and highest sample, and how many samples. */
 data class DayStat(val date: LocalDate, val value: Float, val min: Float, val max: Float, val count: Int) {

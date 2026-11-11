@@ -53,6 +53,7 @@ import org.openstrap.app.ui.dashboard.Detail
 import org.openstrap.app.ui.dashboard.LocalScrollToTop
 import org.openstrap.app.ui.dashboard.MomentHeader
 import org.openstrap.app.ui.dashboard.RecoveryFailure
+import org.openstrap.app.ui.dashboard.SleepCopy
 import org.openstrap.app.ui.dashboard.StrapChip
 import org.openstrap.app.ui.dashboard.Wear
 import org.openstrap.app.presentation.dayTitle
@@ -305,8 +306,8 @@ private fun TabRoot(
             )
         }
         Tab.Recovery -> GlowRecoveryScreen(
-            day, shown.recovery, histories.daily, header = { TabHeader(Tab.Recovery, header) }, contentPadding = padding,
-            onOpenMetric = { openStack(Tab.Recovery, Detail.OfMetric(it)) },
+            day, shown.recovery, header = { TabHeader(Tab.Recovery, header) }, contentPadding = padding,
+            onOpenMetric = { openStack(Tab.Recovery, Detail.OfMetric(it, night = it in SleepCopy.NIGHT_FIGURES)) },
             onOpenScore = { openStack(Tab.Recovery, Detail.OfScore(it)) },
             strapScore = shown.strapScore,
             healthspan = shown.healthspan,

@@ -92,7 +92,7 @@ enum class OffWords {
     /** Blood oxygen: only Below normal is news. */
     LowOnly,
 
-    /** Recovery, Stress, Load: Above or Below usual. */
+    /** Recovery, Load: Above or Below usual. */
     Usual,
 
     /** Last night: Long or Short. */
