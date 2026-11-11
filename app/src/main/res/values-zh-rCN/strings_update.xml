@@ -28,4 +28,5 @@
     <string name="update_installed_title">已更新至 unstrap %1$s</string>
     <string name="update_installed_text">轻触查看新变化。</string>
     <string name="update_channel_name">应用更新</string>
+    <string name="update_install_not_allowed">unstrap 没有安装应用的权限，因此未能更新</string>
 </resources>

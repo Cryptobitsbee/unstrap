@@ -2,6 +2,7 @@ package org.openstrap.app.device
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -63,12 +64,14 @@ internal class SyncCoordinator(
     val isSyncing: Boolean get() = running
 
     init {
-        // Every sync's start and end, pulled or in the background, so Today can tell a stuck sync from a slow one.
+        // What the last runs left, kept across restarts: the one status the header, the Strap page and the widgets read.
         scope.launch {
-            var previous: SyncState = SyncState.Idle
-            sync.collect { s ->
-                syncRecord.update { it.next(previous, s, clock() / MILLIS_PER_SECOND) }
-                previous = s
+            catching { settings.strapSnapshot.first() }.onSuccess { kept ->
+                // Not once a sync has run in this process: its own result is newer.
+                syncRecord.update {
+                    if (it.lastAttempt != null) it
+                    else it.copy(lastSuccess = it.lastSuccess ?: kept.lastSyncDone, failingSince = kept.failingSince ?: it.failingSince)
+                }
             }
         }
         scope.launch { for (task in queue) runTask(task) }
@@ -152,24 +155,57 @@ internal class SyncCoordinator(
         if (task !is SyncTask.Demand) lastStartMs = clock()
         log("sync: $task")
         running = true
+        syncRecord.update { it.attempted(clock() / MILLIS_PER_SECOND) }
+        // HistorySync writes into [inner]. The app sees its steps, but not how it ended before the work after it is done:
+        // until then the coordinator is busy, so the header can't say Synced and offer Disconnect while it still writes.
+        val inner = MutableStateFlow<SyncState>(SyncState.Idle)
+        val forward = scope.launch { inner.collect { if (it is SyncState.Running) sync.value = it } }
+        var end: SyncState? = null
         try {
             val only = (task as? SyncTask.Demand)?.types
             catching {
                 withTimeout(SyncPolicy.WHOLE_SYNC_MS) {
-                    HistorySync(s, client, dao, settings, sync, log, notifiers.autoDetected::show).run(only)
+                    HistorySync(s, client, dao, settings, inner, log, notifiers.autoDetected::show).run(only)
                 }
             }.onFailure { log("sync: $it") }
-            if (sync.value is SyncState.Running) sync.value = SyncState.Failed(Strings.app.get(R.string.system_sync_stopped))
-            (sync.value as? SyncState.Done)?.let { d ->
-                lastSuccessMs = d.atEpochSeconds * MILLIS_PER_SECOND
-                catching { settings.setLastSyncDone(d.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
-            }
+            forward.cancelAndJoin()
+            val result = inner.value.takeIf { it is SyncState.Done || it is SyncState.Failed }
+                ?: SyncState.Failed(Strings.app.get(R.string.system_sync_stopped))
+            end = result
+            if (sync.value !is SyncState.Running) sync.value = SyncState.Running(Strings.app.get(R.string.system_sync_preparing))
+            recordOutcome(task, result)
             afterSync()
+            sync.value = result
             if (link.activeSession === s) catching { afterFinished(s) }.onFailure { log("after sync: $it") }
             // Everything a widget shows may have moved (widgets spec 7): they watch for this.
             syncEnded.tryEmit(Unit)
         } finally {
             running = false
+            forward.cancel()
+            // A cancelled worker must not leave the state Running.
+            if (sync.value is SyncState.Running) sync.value = end ?: SyncState.Failed(Strings.app.get(R.string.system_sync_stopped))
+        }
+    }
+
+    /**
+     * What a finished sync leaves. Any success sets [lastSuccessMs], which the 120 s check reads, as in Zepp. Only a full
+     * sync moves the kept "Synced" time and ends the failure: a push syncs a few types. A failure of either begins one.
+     */
+    private suspend fun recordOutcome(task: SyncTask, end: SyncState) {
+        val now = clock() / MILLIS_PER_SECOND
+        when (end) {
+            is SyncState.Done -> {
+                lastSuccessMs = end.atEpochSeconds * MILLIS_PER_SECOND
+                if (task is SyncTask.Full) {
+                    syncRecord.update { it.succeeded(end.atEpochSeconds) }
+                    catching { settings.setLastSyncDone(end.atEpochSeconds) }.onFailure { log("sync time not kept: $it") }
+                }
+            }
+            is SyncState.Failed -> {
+                syncRecord.update { it.failed(now) }
+                catching { settings.setSyncFailing(now) }.onFailure { log("sync failure not kept: $it") }
+            }
+            else -> Unit
         }
     }
 

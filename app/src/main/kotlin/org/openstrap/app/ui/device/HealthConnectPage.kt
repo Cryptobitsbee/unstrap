@@ -55,6 +55,8 @@ fun HealthConnectPage(
     onOpen: () -> Unit,
     onInstall: () -> Unit,
     onBack: () -> Unit,
+    caloriesMissing: Boolean = false,
+    onOfferCalories: () -> Unit = {},
 ) {
     BackHandler(onBack = onBack)
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
@@ -86,6 +88,7 @@ fun HealthConnectPage(
                 )
             }
         }
+        if (caloriesMissing) item { CaloriesOffer(onOfferCalories) }
     }
 }
 
@@ -100,6 +103,15 @@ private fun InstallPanel(onInstall: () -> Unit) {
         PageButton(
             stringResource(R.string.you_hc_install), onInstall, Modifier.fillMaxWidth(), primary = true, icon = AppIcons.DownloadSimple,
         )
+    }
+}
+
+/** Calories off: why they are left out, and the button that asks for just those permissions. */
+@Composable
+private fun CaloriesOffer(onOffer: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        PageNote(stringResource(R.string.you_hc_calories_note))
+        PageButton(stringResource(R.string.you_hc_calories_offer), onOffer, Modifier.fillMaxWidth(), icon = AppIcons.Plus)
     }
 }
 

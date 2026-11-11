@@ -42,6 +42,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
@@ -84,6 +85,25 @@ private val PhotoRoom = 64.dp
 
 /** How long "Saved" stays on the button. */
 private const val SAVED_MS = 2_000L
+
+/**
+ * The photo behind the card: none picked, being read (Save waits, or the card would export without it), ready, or
+ * unreadable. Ready and Failed remember which [uri] they answer, so a newer pick reads as Loading at once.
+ */
+internal sealed interface SharePhoto {
+    data object None : SharePhoto
+    data object Loading : SharePhoto
+    data class Ready(val uri: Uri, val bitmap: ImageBitmap) : SharePhoto
+    data class Failed(val uri: Uri) : SharePhoto
+}
+
+/** What to show for the picked [uri], given the latest [decoded] answer (which may still be for an earlier pick). */
+internal fun sharePhotoFor(uri: Uri?, decoded: SharePhoto): SharePhoto = when {
+    uri == null -> SharePhoto.None
+    decoded is SharePhoto.Ready && decoded.uri == uri -> decoded
+    decoded is SharePhoto.Failed && decoded.uri == uri -> decoded
+    else -> SharePhoto.Loading
+}
 
 /** What the card is being drawn for. */
 private enum class Export { Save, Share }
@@ -132,7 +152,14 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
     }
     val context = LocalContext.current
     var photoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    val photo by produceState<ImageBitmap?>(null, photoUri) { value = photoUri?.let { decodePhoto(context, it) } }
+    val decoded by produceState<SharePhoto>(SharePhoto.None, photoUri) {
+        value = photoUri?.let { uri ->
+            decodePhoto(context, uri)?.let { SharePhoto.Ready(uri, it) } ?: SharePhoto.Failed(uri)
+        } ?: SharePhoto.None
+    }
+    val photoState = sharePhotoFor(photoUri, decoded)
+    val photo = (photoState as? SharePhoto.Ready)?.bitmap
+    val canExport = photoState !is SharePhoto.Loading
     var routeMode by rememberSaveable { mutableStateOf(StoryRoute.Line) }
     var hideEnds by rememberSaveable { mutableStateOf(true) }
     val hasRoute = card is StoryCard.Run && Route.mappable(route)
@@ -143,7 +170,8 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
 
     // Save and Share draw the card again off screen at 1080 by 1920, record it, and turn the recording into a PNG.
     var export by remember { mutableStateOf<Export?>(null) }
-    var saved by remember { mutableStateOf<Boolean?>(null) }
+    // Saveable: a turn of the phone while the picture is written keeps the answer to show.
+    var saved by rememberSaveable { mutableStateOf<Boolean?>(null) }
     val layer = rememberGraphicsLayer()
     val recorded = remember(export) { CompletableDeferred<Unit>() }
     fun save() {
@@ -186,10 +214,16 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
                         null -> R.string.glow_save
                     },
                 )
-                WorkoutButton(saveLabel, Raised, Color.White, { if (export == null) save() }, Modifier.weight(1f), icon = if (saved == true) AppIcons.Tick02 else AppIcons.DownloadSimple)
+                // Not while the photo is still being read (the card would save without it) or another export is running.
+                val ready = canExport && export == null
+                val dim = Modifier.alpha(if (canExport) 1f else 0.4f)
                 WorkoutButton(
-                    stringResource(R.string.glow_share), Color.White, Color.Black, { if (export == null) export = Export.Share },
-                    Modifier.weight(1f), icon = AppIcons.UploadSimple,
+                    saveLabel, Raised, Color.White, { if (ready) save() }, Modifier.weight(1f).then(dim),
+                    icon = if (saved == true) AppIcons.Tick02 else AppIcons.DownloadSimple,
+                )
+                WorkoutButton(
+                    stringResource(R.string.glow_share), Color.White, Color.Black, { if (ready) export = Export.Share },
+                    Modifier.weight(1f).then(dim), icon = AppIcons.UploadSimple,
                 )
             }
         },
@@ -231,6 +265,13 @@ private fun ShareScreen(card: StoryCard, route: List<Route.Point>, fileName: Str
                     stringResource(if (photo != null) R.string.glow_share_change_photo else R.string.glow_share_add_photo),
                     { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, icon = AppIcons.Image,
                 )
+                if (photoState is SharePhoto.Failed) {
+                    Text(
+                        stringResource(R.string.glow_share_photo_failed),
+                        color = Color.White.copy(alpha = 0.6f), style = GlowType.secondary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
             }
         }
         if (hasRoute) {

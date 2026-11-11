@@ -79,6 +79,18 @@ class BlePermissionsTest {
         assertFalse(BlePermissions.granted(mapOf(Manifest.permission.BLUETOOTH_CONNECT to true)))
     }
 
+    @Test @Config(sdk = [34]) fun `a notifications denial is told apart from no answer`() {
+        val n = Manifest.permission.POST_NOTIFICATIONS
+        assertTrue(BlePermissions.notificationsDenied(mapOf(n to false)))
+        assertFalse(BlePermissions.notificationsDenied(mapOf(n to true)))
+        assertFalse(BlePermissions.notificationsDenied(emptyMap()))
+        assertEquals(listOf(n), BlePermissions.notifications)
+        shadowOf(app).denyPermissions(n)
+        assertFalse(BlePermissions.notificationsGranted(app))
+        shadowOf(app).grantPermissions(n)
+        assertTrue(BlePermissions.notificationsGranted(app))
+    }
+
     @Test fun `turned down for good once Android owes no rationale for any of them`() {
         val activity = Robolectric.buildActivity(android.app.Activity::class.java).setup().get()
         val pm = shadowOf(activity.packageManager)

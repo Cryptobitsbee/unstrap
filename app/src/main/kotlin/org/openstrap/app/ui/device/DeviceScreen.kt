@@ -104,14 +104,20 @@ internal fun strapStateLine(
     lastSeen: Long?,
     now: Long,
     strings: Strings = Strings.app,
+    /** The last full sync ([org.openstrap.app.device.SyncRecord.lastSuccess]), kept across restarts. */
+    lastSync: Long? = null,
 ): String = when (connection) {
-    is ConnectionState.Connected -> when {
-        connection.charging -> strings.get(R.string.you_strap_state_charging)
-        sync is SyncState.Running -> strings.get(R.string.you_strap_state_syncing)
-        sync is SyncState.Done -> strings.format(R.string.you_strap_state_synced, agoText(now - sync.atEpochSeconds).lowercase())
-        sync is SyncState.Failed -> strings.get(R.string.you_strap_state_not_synced)
-        else -> strings.get(R.string.you_strap_state_connected)
+    is ConnectionState.Connected -> {
+        val synced = lastSync ?: (sync as? SyncState.Done)?.atEpochSeconds
+        when {
+            connection.charging -> strings.get(R.string.you_strap_state_charging)
+            sync is SyncState.Running -> strings.get(R.string.you_strap_state_syncing)
+            sync is SyncState.Failed -> strings.get(R.string.you_strap_state_not_synced)
+            synced != null -> strings.format(R.string.you_strap_state_synced, agoText(now - synced).lowercase())
+            else -> strings.get(R.string.you_strap_state_connected)
+        }
     }
+    ConnectionState.BluetoothOff -> strings.get(R.string.you_strap_state_bluetooth_off)
     ConnectionState.Connecting, ConnectionState.Authenticating -> strings.get(R.string.you_strap_state_connecting)
     is ConnectionState.Failed ->
         strings.get(if (connection.keyRejected) R.string.you_strap_state_key_rejected else R.string.you_strap_state_cant_connect)
@@ -153,6 +159,7 @@ fun DeviceScreen(
     val strapConnected = connection is ConnectionState.Connected
     androidx.compose.runtime.LaunchedEffect(strapConnected) { if (strapConnected) vm.checkCanRestart() }
     val sync by vm.sync.collectAsStateWithLifecycle()
+    val record by vm.syncRecord.collectAsStateWithLifecycle()
     val scan by vm.scan.collectAsStateWithLifecycle()
     val info by vm.info.collectAsStateWithLifecycle()
     val calls by vm.buzzOnCalls.collectAsStateWithLifecycle()
@@ -205,7 +212,12 @@ fun DeviceScreen(
             item { PairPanel(vm, scan, onRequestBluetooth) }
             return@ScreenList
         }
-        item { StrapHero(device.name, preview?.connection ?: connection, preview?.sync ?: sync, preview?.lastSeen ?: lastSeen) }
+        item {
+            StrapHero(
+                device.name, preview?.connection ?: connection, preview?.sync ?: sync, preview?.lastSeen ?: lastSeen,
+                (preview?.record ?: record).lastSuccess,
+            )
+        }
         val failed = connection as? ConnectionState.Failed
         if (failed?.keyRejected == true) item { KeyRejectedPanel(failed.reason, onPairAgain = vm::forget) }
         else item {
@@ -221,6 +233,13 @@ fun DeviceScreen(
                     }
                     ConnectionState.Connecting, ConnectionState.Authenticating ->
                         PageButton(stringResource(R.string.you_action_cancel), vm::disconnect, Modifier.fillMaxWidth().height(56.dp))
+                    ConnectionState.BluetoothOff -> {
+                        val context = LocalContext.current
+                        PageButton(
+                            stringResource(R.string.you_strap_turn_on_bluetooth), { onRequestBluetooth { turnOnBluetooth(context) } },
+                            Modifier.fillMaxWidth().height(56.dp), primary = true, icon = AppIcons.Bluetooth,
+                        )
+                    }
                     else -> PageButton(
                         stringResource(R.string.you_strap_connect), { onRequestBluetooth { vm.connect() } },
                         Modifier.fillMaxWidth().height(56.dp), primary = true,
@@ -293,6 +312,17 @@ fun DeviceScreen(
     }
 }
 
+/**
+ * Asks Android to turn Bluetooth on, which shows its own dialog. Where that can't be asked (no permission yet, or a phone
+ * that refuses), opens the Bluetooth settings.
+ */
+private fun turnOnBluetooth(context: android.content.Context) {
+    runCatching { context.startActivity(android.content.Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+        .onFailure {
+            runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS)) }
+        }
+}
+
 /** Find strap: buzzes the strap and becomes Stop while it runs; it stops by itself after 60 s, as Zepp's does. */
 @Composable
 private fun FindStrapButton(vm: DeviceViewModel, modifier: Modifier) {
@@ -338,6 +368,7 @@ private fun KeepConnectedRow(vm: DeviceViewModel, keepConnected: KeepConnected, 
     val associated by vm.companionAssociated.collectAsStateWithLifecycle()
     val ignoringBattery by vm.ignoringBatteryOptimizations.collectAsStateWithLifecycle()
     val declined by vm.companionDeclined.collectAsStateWithLifecycle()
+    val hidden by vm.companionOfferHidden.collectAsStateWithLifecycle()
     val title = stringResource(R.string.you_strap_row_background)
     val on = stringResource(R.string.you_value_on)
     val off = stringResource(R.string.you_value_off)
@@ -345,7 +376,7 @@ private fun KeepConnectedRow(vm: DeviceViewModel, keepConnected: KeepConnected, 
     val icon = AppIcons.Bluetooth
     when {
         associated -> PageRow(title, on, icon = icon)
-        vm.companionSupported && !declined -> PageRow(title, off, onClick = { keepConnected.associate(address) }, icon = icon)
+        vm.companionSupported && !declined && !hidden -> PageRow(title, off, onClick = { keepConnected.associate(address) }, icon = icon)
         !ignoringBattery -> PageRow(title, off, icon = icon, onClick = {
             runCatching {
                 context.startActivity(
@@ -360,7 +391,7 @@ private fun KeepConnectedRow(vm: DeviceViewModel, keepConnected: KeepConnected, 
 
 /** The strap in a glow card: its name, the state line, a drawing of it with its light, and the battery. */
 @Composable
-internal fun StrapHero(name: String, connection: ConnectionState, sync: SyncState, lastSeen: Long?) {
+internal fun StrapHero(name: String, connection: ConnectionState, sync: SyncState, lastSeen: Long?, lastSync: Long? = null) {
     val connected = connection as? ConnectionState.Connected
     val battery = connected?.batteryPercent
     val led = when {
@@ -378,8 +409,9 @@ internal fun StrapHero(name: String, connection: ConnectionState, sync: SyncStat
             Column(Modifier.fillMaxWidth().padding(end = 112.dp)) {
                 Text(name, color = Color.White, style = GlowType.cardTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    strapStateLine(connection, sync, lastSeen, now), color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA),
-                    style = GlowType.secondary, modifier = Modifier.padding(top = 4.dp),
+                    strapStateLine(connection, sync, lastSeen, now, lastSync = lastSync),
+                    color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             // 5 dp under it, so the space below the battery matches the space the title's line height leaves above it.

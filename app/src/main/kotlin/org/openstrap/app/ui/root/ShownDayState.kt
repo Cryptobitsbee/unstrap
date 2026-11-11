@@ -13,6 +13,7 @@ import java.time.LocalDate
 import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.ui.dashboard.DataPreview
+import org.openstrap.app.ui.dashboard.DayScreenState
 import org.openstrap.app.ui.dashboard.DayUiState
 import org.openstrap.app.ui.dashboard.DayViewModel
 import org.openstrap.app.ui.dashboard.FirstScore
@@ -22,11 +23,17 @@ import org.openstrap.app.ui.dashboard.earliestScore
 import org.openstrap.app.ui.dashboard.firstScore
 import org.openstrap.app.ui.dashboard.previewed
 import org.openstrap.app.ui.dashboard.wear
+import org.openstrap.app.ui.components.rememberDayHold
 
 private const val S_PER_MIN = 60
 
 /** The day, its Recovery and a failed Recovery as the screens are shown them, the debug previews applied. */
-class PreviewedDay(val day: DayUiState, val recovery: RecoveryResult?, val recoveryFailure: RecoveryFailure?)
+class PreviewedDay(
+    val screen: DayScreenState,
+    val day: DayUiState,
+    val recovery: RecoveryResult?,
+    val recoveryFailure: RecoveryFailure?,
+)
 
 /**
  * The day shown with the debug previews applied: a strap [preview] of a failed Recovery shows the day as failed, with
@@ -35,9 +42,10 @@ class PreviewedDay(val day: DayUiState, val recovery: RecoveryResult?, val recov
  */
 @Composable
 internal fun rememberPreviewedDay(dayVm: DayViewModel, preview: StrapPreview?, data: DataPreview?): PreviewedDay {
-    val realRecovery by dayVm.recovery.collectAsStateWithLifecycle()
-    val realRecoveryFailure by dayVm.recoveryFailure.collectAsStateWithLifecycle()
-    val realDay by dayVm.state.collectAsStateWithLifecycle()
+    val screen by dayVm.screen.collectAsStateWithLifecycle()
+    val realRecovery = screen.recovery
+    val realRecoveryFailure = screen.recoveryFailure
+    val realDay = screen.day
     val day = remember(realDay, data) { realDay.previewed(data) }
     val previewFailure = if (preview == StrapPreview.RecoveryFail) {
         realRecovery?.let { r -> RecoveryFailure(r.date, r.readinessTrend.firstOrNull { it.first == r.date.minusDays(1) }?.second) }
@@ -45,7 +53,7 @@ internal fun rememberPreviewedDay(dayVm: DayViewModel, preview: StrapPreview?, d
         null
     }
     val recovery = if (previewFailure != null) null else realRecovery?.previewed(data)
-    return PreviewedDay(day, recovery, previewFailure ?: realRecoveryFailure)
+    return PreviewedDay(screen, day, recovery, previewFailure ?: realRecoveryFailure)
 }
 
 /**
@@ -54,24 +62,28 @@ internal fun rememberPreviewedDay(dayVm: DayViewModel, preview: StrapPreview?, d
  */
 @Composable
 internal fun rememberShownDay(
-    shown: PreviewedDay,
-    dayVm: DayViewModel,
+    live: PreviewedDay,
     rootVm: AppRootViewModel,
     clockDate: LocalDate,
     now: Long,
     preview: StrapPreview?,
     data: DataPreview?,
 ): ShownDay {
+    // Another day's rows take a moment to arrive: for that moment the last day stays up, dimmed, then the placeholder
+    // ([rememberDayHold]), never the old day's numbers for long.
+    val hold = rememberDayHold(live.takeIf { it.screen.loaded }, live.screen.date)
+    val shown = hold.value ?: live
     val day = shown.day
     val recovery = shown.recovery
-    val healthspan by dayVm.healthspan.collectAsStateWithLifecycle()
     LaunchedEffect(day.date) { rootVm.dayShown(day.date) }
     val dayExtras by rootVm.dayExtras.collectAsStateWithLifecycle()
+    // The check-in follows the day by its own flow, so it only counts once it's this day's.
+    val checkIn = dayExtras.takeIf { it.date == day.date }?.checkIn
     val dayIsToday = day.date == clockDate
     val wear = day.wear(recovery, dayIsToday)
         .previewed(data, (((if (dayIsToday) now else day.dayEnd + 1) - day.dayStart) / S_PER_MIN).toInt())
     val firstScoreDay by rootVm.firstScoreDay.collectAsStateWithLifecycle()
-    val dayRecovery = recovery?.takeIf { it.date == day.date }
+    val dayRecovery = recovery
     val first = if (firstScoreDay == FirstScoreDay.Loading) {
         FirstScore(false)
     } else {
@@ -84,7 +96,8 @@ internal fun rememberShownDay(
         if (preview == null && data == null) first.remember?.let(rootVm::markFirstScore)
     }
     return ShownDay(
-        day, recovery, shown.recoveryFailure, healthspan, dayExtras.checkIn, wear,
+        day, recovery, shown.recoveryFailure, shown.screen.healthspan, checkIn, wear,
         firstScore = first.show || data == DataPreview.FirstScoreShown,
+        loading = !shown.screen.loaded, pending = hold.pending, usualSteps = shown.screen.usualSteps, activity = shown.screen.activity,
     )
 }

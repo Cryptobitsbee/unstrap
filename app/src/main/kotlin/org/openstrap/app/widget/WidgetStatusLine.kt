@@ -30,7 +30,8 @@ data class StatusLine(val status: StrapStatus, val options: List<String>) {
             val shorter = when (status) {
                 StrapStatus.NotPaired -> listOf(strings.get(R.string.system_widget_status_not_paired_short))
                 is StrapStatus.LowBattery -> listOf(strings.format(R.string.system_widget_status_percent, status.percent))
-                StrapStatus.Syncing -> emptyList()
+                StrapStatus.Syncing, StrapStatus.SyncFailed -> emptyList()
+                StrapStatus.BluetoothOff -> listOf(strings.get(R.string.system_widget_status_bluetooth_off_short))
                 is StrapStatus.StaleSync -> {
                     val then = Instant.ofEpochSecond(status.at).atZone(zone).toLocalDate()
                     val days = ChronoUnit.DAYS.between(then, Instant.ofEpochSecond(now).atZone(zone).toLocalDate())

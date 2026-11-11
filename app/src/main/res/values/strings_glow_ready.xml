@@ -39,6 +39,10 @@
         <item quantity="other"><xliff:g id="count" example="12">%d</xliff:g> sports</item>
     </plurals>
 
+    <!-- Ready, under the close button, when you disconnected the strap: it stays disconnected until you connect it. -->
+    <string name="glow_ready_strap_disconnected">Your strap is disconnected. Recording works without it, but with no live heart rate.</string>
+    <!-- Ready's button that connects the strap you disconnected. -->
+    <string name="glow_ready_connect">Connect strap</string>
     <!-- Ready's heart card beside the live heart rate drawn large. -->
     <string name="glow_ready_bpm_live">bpm, live from your strap</string>
     <!-- Spoken for the plan pill on Ready, for screen readers: the plan's name, then what tapping it does. -->

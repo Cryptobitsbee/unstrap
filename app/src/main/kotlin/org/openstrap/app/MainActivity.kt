@@ -131,6 +131,10 @@ class MainActivity : ComponentActivity() {
         )
         val container = (application as OpenStrapApp).container
         showLiveWorkoutWhenLocked(container)
+        // Only a fresh launch asks for something. A restored activity (process death, then back from Recents) is
+        // handed its original launch intent again, extras intact, and nav is restored too: replaying them would
+        // pile the old request on top of where the user had got to.
+        if (savedInstanceState == null && !launchedFromHistory(intent)) showWorkoutFromIntent()
         setContent {
             OpenStrapTheme {
                 AppRoot(container, navRequests, previews, pendingStrap)
@@ -170,8 +174,10 @@ class MainActivity : ComponentActivity() {
         (application as OpenStrapApp).container.workout.inFront()
         // The association or battery setting may have changed in system settings meanwhile.
         (application as OpenStrapApp).container.companion.refresh()
+        // Call and notification access may have been granted in system settings meanwhile.
+        (application as OpenStrapApp).container.phoneAlerts.refresh()
+        // Debug extras only: the real launch extras are read once, in onCreate and onNewIntent.
         handleDebugIntent(previews)
-        showWorkoutFromIntent()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -180,6 +186,10 @@ class MainActivity : ComponentActivity() {
         handleDebugIntent(previews)
         showWorkoutFromIntent()
     }
+
+    /** A launch from the Recents list: its intent is the original one, not a new request. */
+    private fun launchedFromHistory(intent: Intent?): Boolean =
+        intent != null && intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
 
     /**
      * The workout notification opens the live screen, even if it was tucked away. A shortcut or the tile opens the
@@ -351,7 +361,7 @@ private fun AppRoot(
         day, previewed.recovery, previewed.recoveryFailure, running != null, forced, workoutsVm, onNewDay = dayVm::select,
     )
     val strap = rememberStrapHeader(strapFacts, day, preview)
-    val shown = rememberShownDay(previewed, dayVm, rootVm, today.clockDate, strap.now, preview, dataPreview)
+    val shown = rememberShownDay(previewed, rootVm, today.clockDate, strap.now, preview, dataPreview)
     val histories = remember(container) {
         Histories { m, from, to -> container.health.daily(m, from, to) }
     }
@@ -396,6 +406,7 @@ private fun AppRoot(
             strapOpened = { growFrom = growOrigin.take() },
             showWorkout = { container.workout.minimized.value = false },
         ),
+        container.workout.state,
     )
     // Starting a workout closes Ready and Choose. [saved] is what Ready opens on next time for the sport, and Choose's
     // Start on your usual saves nothing new.

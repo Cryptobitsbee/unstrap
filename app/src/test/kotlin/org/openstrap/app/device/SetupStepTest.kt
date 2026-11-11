@@ -14,6 +14,7 @@ import org.junit.Test
 import org.openstrap.app.ble.GattTimeoutException
 import org.openstrap.app.testing.assertCleanCopy
 import org.openstrap.protocol.ProtocolTimeoutException
+import org.openstrap.protocol.auth.AuthException
 
 /** afterAuth's steps (audit C5) and the connect failure copy (E4, E6). */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -77,10 +78,23 @@ class SetupStepTest {
     }
 
     @Test
-    fun onlyPermissionAndAddressFailuresAreFinal() {
+    fun onlyPermissionAddressAndTurnedDownKeyFailuresAreFinal() {
         assertTrue(ConnectErrors.isFinal(org.openstrap.app.ble.GattUnusableException("bad", IllegalArgumentException())))
         assertTrue(ConnectErrors.isFinal(SecurityException("denied")))
         assertEquals(false, ConnectErrors.isFinal(GattTimeoutException("slow")))
         assertEquals(false, ConnectErrors.isFinal(ProtocolTimeoutException("slow")))
+        // Wrong key, cloud bind required: the same key fails again. A workout running on the strap ends.
+        assertTrue(ConnectErrors.isFinal(AuthException(0x26, "wrong key")))
+        assertTrue(ConnectErrors.isFinal(AuthException(0x81, "cloud bind")))
+        assertEquals(false, ConnectErrors.isFinal(AuthException(5, "workout running")))
+        assertEquals(false, ConnectErrors.isFinal(AuthException(0x99, "unknown")))
+    }
+
+    @Test
+    fun aKeyIsTurnedDownExactlyWhenRetryingCantHelp() {
+        for (status in listOf(5, 7, 8, 0x23, 0x25, 0x26, 0x41, 0x81, 0x99)) {
+            val e = AuthException(status, "status $status")
+            assertEquals("status $status", ConnectErrors.isFinal(e), PairingErrors.authFailure(e).keyRejected)
+        }
     }
 }

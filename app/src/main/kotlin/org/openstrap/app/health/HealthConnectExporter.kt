@@ -1,5 +1,7 @@
 package org.openstrap.app.health
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
@@ -62,6 +64,13 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         override suspend fun deleteRange(type: KClass<out Record>, range: TimeRangeFilter) = client.deleteRecords(type, range)
     }
 
+    /**
+     * Every write to Health Connect (the worker, turning auto sync on, a saved workout, an edited sleep, the manual
+     * copy) goes through this one lock. A write reads its own records, inserts, then deletes the stale ones, so two
+     * side by side could delete what the other had just inserted.
+     */
+    private val writeLock = Mutex()
+
     /** Every record of [type] in [range] that OpenStrap wrote, a page at a time. */
     private suspend fun <T : Record> readAll(type: KClass<T>, range: TimeRangeFilter): List<T> {
         val out = mutableListOf<T>()
@@ -95,7 +104,7 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         HealthPermission.getWritePermission(TotalCaloriesBurnedRecord::class),
     )
 
-    /** What a write asks Health Connect for. */
+    /** What a write asks Health Connect for: the needed ones with the optional calories, so they are offered in the same screen. */
     val requestedPermissions: Set<String> get() = permissions + caloriePermissions
 
     /** Reading back what was exported; history is the permission to read further back than 30 days. */
@@ -122,9 +131,9 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     suspend fun hasPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
-    /** Every permission a write asks for, the optional calorie ones too: when not, the write asks again first. */
-    suspend fun hasRequestedPermissions(): Boolean =
-        client.permissionController.getGrantedPermissions().containsAll(requestedPermissions)
+    /** Whether the optional calorie permissions are granted, for the Health Connect page's offer to ask again. */
+    suspend fun hasCaloriePermissions(): Boolean =
+        client.permissionController.getGrantedPermissions().containsAll(caloriePermissions)
 
     /** The record reads the user has granted (any of them is enough to import that kind). */
     suspend fun hasReadPermissions(): Boolean =
@@ -190,8 +199,9 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         val resting = restingHr(from, to, ZoneId.systemDefault())
         records += resting
 
-        store.write(records, kcalRanges + (SleepSessionRecord::class to sleepRange(from, to)))
-        store.dropMovedRestingHr(resting)
+        store.writeSerially(writeLock, records, kcalRanges + (SleepSessionRecord::class to sleepRange(from, to))) {
+            dropMovedRestingHr(resting)
+        }
         return records.size
     }
 
@@ -216,7 +226,7 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
      */
     suspend fun exportSleep(from: Long, to: Long, now: Long = System.currentTimeMillis() / 1000): Int {
         val records = sleep(from, to, now)
-        store.write(records, listOf(SleepSessionRecord::class to sleepRange(from, to)))
+        store.writeSerially(writeLock, records, listOf(SleepSessionRecord::class to sleepRange(from, to)))
         return records.size
     }
 
@@ -280,7 +290,7 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         val (from, to) = AutoHealthConnect.workoutRange(w.from, end, now)
         val (kcal, kcalRanges) = calories(w.from, end, now)
         val records = heartRate(from, to) + steps(from, to) + workouts(listOf(w)) + kcal
-        store.write(records, kcalRanges)
+        store.writeSerially(writeLock, records, kcalRanges)
         return records.size
     }
 
@@ -521,6 +531,20 @@ internal suspend fun RecordStore.write(records: List<Record>, replaced: List<Pai
         val stale = own.orEmpty().filter { it.metadata.clientRecordId !in written }.map { it.metadata.id }
         stale.chunked(HC_BATCH).forEach { deleteIds(type, it) }
     }
+}
+
+/**
+ * [write] with [after] (more work on the same store, such as taking out moved records), all under [lock], so no other
+ * writer's read, insert and delete runs in between.
+ */
+internal suspend fun RecordStore.writeSerially(
+    lock: Mutex,
+    records: List<Record>,
+    replaced: List<Pair<KClass<out Record>, TimeRangeFilter>>,
+    after: suspend RecordStore.() -> Unit = {},
+) = lock.withLock {
+    write(records, replaced)
+    after()
 }
 
 /** The most records one Health Connect call takes. */

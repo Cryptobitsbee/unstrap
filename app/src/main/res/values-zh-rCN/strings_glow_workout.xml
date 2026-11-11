@@ -47,4 +47,5 @@
     <string name="glow_workout_capsule_pause">暂停</string>
     <string name="glow_workout_capsule_next">下一项</string>
     <string name="glow_workout_capsule_lines">%1$s。%2$s</string>
+    <string name="glow_workout_deleted">此次运动已删除。</string>
 </resources>

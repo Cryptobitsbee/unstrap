@@ -24,7 +24,7 @@ object UpdateCopy {
     ): String {
         val newest = Releases.newer(state.releases, installed).firstOrNull()
         if (newest != null) return strings.format(R.string.update_summary_ready, newest.versionName)
-        if (state.checking) return strings.get(R.string.update_summary_checking)
+        if (state.check == Check.Checking) return strings.get(R.string.update_summary_checking)
         val checked = state.checkedAt ?: return strings.format(R.string.update_summary_version, installed)
         return strings.format(R.string.update_summary_up_to_date, DayWords.whenDone(checked, now, zone, locale = locale))
     }
@@ -37,9 +37,9 @@ object UpdateCopy {
         locale: Locale = Locale.getDefault(),
         strings: Strings = Strings.app,
     ): String {
-        if (state.checking) return strings.get(R.string.update_check_checking)
+        if (state.check == Check.Checking) return strings.get(R.string.update_check_checking)
         val checked = state.checkedAt?.let { DayWords.whenDone(it, now, zone, locale = locale) }
-        if (state.checkFailed) {
+        if (state.check == Check.Failed) {
             return if (checked != null) {
                 strings.format(R.string.update_check_failed_last, checked)
             } else {

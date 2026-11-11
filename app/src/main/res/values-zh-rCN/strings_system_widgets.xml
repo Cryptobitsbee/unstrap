@@ -5,6 +5,9 @@
     <string name="system_widget_status_low_battery">手环电量 %1$d%%</string>
     <string name="system_widget_status_percent">%1$d%%</string>
     <string name="system_widget_status_syncing">正在同步…</string>
+    <string name="system_widget_status_not_synced">未同步</string>
+    <string name="system_widget_status_bluetooth_off">蓝牙已关闭</string>
+    <string name="system_widget_status_bluetooth_off_short">蓝牙关闭</string>
     <string name="system_widget_status_synced">已同步 %1$s</string>
     <string name="system_widget_open">打开</string>
     <string name="system_widget_this_week">本周</string>
