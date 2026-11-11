@@ -388,6 +388,27 @@ interface HealthDao : RangedReads {
         deleteAppWorkoutRow(start)
     }
 
+    /**
+     * Discards the phone workout [start] whole: the workout, the strap's own records of it
+     * ([org.openstrap.app.data.Workouts.strapTwins]) and its time as "Not a workout", in one transaction. Its time range
+     * is read before anything is deleted, and a failure undoes all of it, so a retry finds the workout still there and
+     * does the twin cleanup too. [now] is when it happens. Returns the workout as it was, null if it was gone already.
+     */
+    @androidx.room.Transaction
+    suspend fun discardAppWorkout(start: Long, now: Long): AppWorkout? {
+        val w = appWorkoutOnce(start)
+        val range = w?.takeIf { it.end != null }?.let { org.openstrap.app.data.Workouts.phoneRange(it, now) }
+        val twins = range?.let { org.openstrap.app.data.Workouts.strapTwins(workoutsOnce(it.first, it.last), it) }.orEmpty()
+        // Gone before its twins: a start trimmed into a twin would make it another owner of the strap's effect, and the
+        // effect would stay, its recovery carried into the next workout.
+        deleteAppWorkout(start)
+        twins.forEach { deleteStrapWorkout(it.start, now) }
+        // The strap's copy usually syncs after the summary shows: its time is remembered, and the sync leaves out a
+        // strap workout over it.
+        range?.let { insertDismissedWorkouts(listOf(DismissedWorkout(it.first, it.last))) }
+        return w
+    }
+
     @Query("SELECT * FROM sport_effect WHERE `end` BETWEEN :from AND :to ORDER BY `end`")
     suspend fun sportEffectsOnce(from: Long, to: Long): List<SportEffectRow>
 

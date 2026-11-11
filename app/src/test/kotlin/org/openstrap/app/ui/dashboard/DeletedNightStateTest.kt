@@ -53,8 +53,8 @@ class DeletedNightStateTest {
         db.healthDao().insertSleepSessions(listOf(before, night))
         val repo = HealthRepository(db.healthDao())
         val vm = DayViewModel(RoomDayRepository(repo, LiveSteps()))
-        val collector = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect {} }
-        suspend fun settled(check: (DayUiState) -> Boolean) = vm.state.first { it.loaded && check(it) }
+        val collector = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.screen.collect {} }
+        suspend fun settled(check: (DayUiState) -> Boolean) = vm.screen.first { it.loaded && check(it.day) }.day
 
         settled { it.sleep != null }.let { s -> assertEquals(setOf(today.minusDays(1), today), s.nights.filter { it.session != null }.map { it.date }.toSet()) }
         repo.deleteSleep(night)
@@ -68,5 +68,14 @@ class DeletedNightStateTest {
             assertEquals(setOf(today.minusDays(1), today), s.nights.filter { it.session != null }.map { it.date }.toSet())
         }
         collector.cancel()
+    }
+
+    @Test fun `the picked day is saved, and a restored view model opens on it`() = runTest {
+        val today = LocalDate.now(ZoneId.systemDefault())
+        val repo = RoomDayRepository(HealthRepository(db.healthDao()), LiveSteps())
+        val handle = androidx.lifecycle.SavedStateHandle()
+        DayViewModel(repo, saved = handle).select(today.minusDays(3))
+        val restored = DayViewModel(repo, saved = androidx.lifecycle.SavedStateHandle(mapOf("pickedDay" to handle.get<Long>("pickedDay"))))
+        assertEquals(today.minusDays(3), restored.screen.value.date)
     }
 }

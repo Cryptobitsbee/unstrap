@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -253,3 +254,6 @@ class DayViewModelUiStateTest {
         }
     }
 }
+
+/** The activity history, now part of [DayViewModel.screen]. */
+private val DayViewModel.activityHistory get() = screen.map { it.activity }

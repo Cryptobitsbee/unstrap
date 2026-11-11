@@ -35,4 +35,6 @@
     <plurals name="glow_ready_rounds_description">
         <item quantity="other">%1$d 轮，%2$d 秒运动，%3$d 秒休息</item>
     </plurals>
+    <string name="glow_ready_strap_disconnected">手环未连接。没有手环也能记录，但没有实时心率。</string>
+    <string name="glow_ready_connect">连接手环</string>
 </resources>

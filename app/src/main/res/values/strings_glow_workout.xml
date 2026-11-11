@@ -6,6 +6,8 @@
   unstrap is the app's name, written in lowercase even at the start of a sentence. Keep it as it is.
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
+    <!-- Shown on a workout's page when that workout has been deleted. -->
+    <string name="glow_workout_deleted">This workout was deleted.</string>
     <!-- A workout's name while its sport isn't known yet, as a page title. One word. -->
     <string name="glow_workout_untitled">Workout</string>
     <!-- A short note while a workout or a day's heart rate is read from the database. -->

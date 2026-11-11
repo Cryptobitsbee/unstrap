@@ -11,6 +11,7 @@
     <string name="you_strap_state_not_paired">未配对</string>
     <string name="you_strap_state_last_seen">上次连接于 %1$s</string>
     <string name="you_strap_state_not_connected">未连接</string>
+    <string name="you_strap_state_bluetooth_off">蓝牙已关闭</string>
     <string name="you_strap_disconnect_title">断开手环连接？</string>
     <string name="you_strap_disconnect_text">手环会继续独立记录，但在重新连接之前，unstrap 将无法同步数据或显示实时心率。</string>
     <string name="you_strap_disconnect_text_syncing">正在进行的同步将停止。手环会继续独立记录，但只有再次连接后，unstrap 才会同步或显示实时心率。</string>
@@ -25,6 +26,7 @@
     <string name="you_strap_title">你的手环</string>
     <string name="you_strap_sync_now">立即同步</string>
     <string name="you_strap_connect">连接</string>
+    <string name="you_strap_turn_on_bluetooth">打开蓝牙</string>
     <string name="you_strap_find">查找手环</string>
     <string name="you_strap_find_stop">停止振动</string>
     <string name="you_strap_reading">正在读取…</string>

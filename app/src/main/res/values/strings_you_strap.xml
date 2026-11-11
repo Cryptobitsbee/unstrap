@@ -20,6 +20,7 @@
     <!-- The time is how long ago, in lower case, "18 min ago". -->
     <string name="you_strap_state_last_seen">Last seen <xliff:g id="ago" example="18 min ago">%1$s</xliff:g></string>
     <string name="you_strap_state_not_connected">Not connected</string>
+    <string name="you_strap_state_bluetooth_off">Bluetooth is off</string>
 
     <!-- Asked before Disconnect. -->
     <string name="you_strap_disconnect_title">Disconnect the strap?</string>
@@ -44,6 +45,7 @@
     <!-- Buttons under the strap. -->
     <string name="you_strap_sync_now">Sync now</string>
     <string name="you_strap_connect">Connect</string>
+    <string name="you_strap_turn_on_bluetooth">Turn on Bluetooth</string>
     <!-- Find strap buzzes the strap, and becomes Stop buzzing while it does. -->
     <string name="you_strap_find">Find strap</string>
     <string name="you_strap_find_stop">Stop buzzing</string>

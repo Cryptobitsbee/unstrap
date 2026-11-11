@@ -8,7 +8,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.pager.HorizontalPager
+import org.openstrap.app.ui.components.dayHeld
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ import org.openstrap.app.ui.components.sinkBehind
 import org.openstrap.app.ui.dashboard.DailyHistory
 import org.openstrap.app.ui.dashboard.DayPicker
 import org.openstrap.app.ui.dashboard.DayUiState
+import org.openstrap.app.ui.dashboard.ActivityHistory
 import org.openstrap.app.ui.dashboard.DayViewModel
 import org.openstrap.app.ui.dashboard.Detail
 import org.openstrap.app.ui.dashboard.LocalScrollToTop
@@ -85,6 +88,8 @@ fun tabItems(): List<NavItem> = Tab.entries.map { tab ->
 }
 
 /** The day shown as every tab and detail sees it: the debug previews applied, its Recovery, strap score and check-in. */
+// One field per part of the day the screens show.
+@Suppress("LongParameterList")
 class ShownDay(
     val day: DayUiState,
     val recovery: RecoveryResult?,
@@ -95,9 +100,17 @@ class ShownDay(
     val wear: Wear?,
     /** The first real score shows its moment (E4). */
     val firstScore: Boolean,
+    /** The day's rows haven't arrived yet: the screens show their placeholders, never another day's numbers. */
+    val loading: Boolean = false,
+    /** The last day, kept for a moment while this one loads ([org.openstrap.app.ui.components.rememberDayHold]): drawn dimmed. */
+    val pending: Boolean = false,
+    /** Your usual steps by hour for the day shown, null until there are enough worn days. */
+    val usualSteps: List<Float>? = null,
+    /** Heart points, calories and steps up to the day shown. */
+    val activity: ActivityHistory = ActivityHistory(),
 ) {
     /** The strap's own score for the day shown's night, by the strap session it came from ([RecoveryResult.strapScore]). */
-    val strapScore: Int? get() = recovery?.takeIf { it.date == day.date }?.strapScore
+    val strapScore: Int? get() = recovery?.strapScore
 }
 
 /** The stored histories the charts read. */
@@ -203,10 +216,10 @@ internal fun TabsPager(
                 detail = { stack -> stack.lastOrNull()?.let { detail(t, it) } },
             ) {
                 PullToSync(strap.sync, connected, container.strap::syncNow) {
-                    TabRoot(
+                    Box(Modifier.dayHeld(shown.pending)) { TabRoot(
                         t, nav, shown, histories, today, container, dayVm, workoutsVm, rootVm, live, padding, showCharge,
                         onChargeConsume, header, onOpenPage, seeHabitAge,
-                    )
+                    ) }
                 }
             }
         }
@@ -242,8 +255,8 @@ private fun TabRoot(
 ) {
     val day = shown.day
     val workouts by workoutsVm.workouts.collectAsStateWithLifecycle()
-    val usualSteps by dayVm.usualSteps.collectAsStateWithLifecycle()
-    val activity by dayVm.activityHistory.collectAsStateWithLifecycle()
+    val usualSteps = shown.usualSteps
+    val activity = shown.activity
     val suggestions by workoutsVm.suggestions.collectAsStateWithLifecycle()
     // Hidden while a workout records: the strap's history may show the one under way.
     val suggestion = suggestions.firstOrNull().takeIf { today.running == null }

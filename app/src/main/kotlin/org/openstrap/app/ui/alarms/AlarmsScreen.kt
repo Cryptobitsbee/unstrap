@@ -17,6 +17,10 @@ import androidx.compose.material3.TimePickerDefaults
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -141,13 +145,32 @@ fun AlarmsScreen(
             onDismiss = { confirmDeleteAll = false },
         )
     }
+    // A refresh can change the alarm under an open sheet (a one-time alarm switching itself off, say). Saving the old copy
+    // would undo that, so the sheet moves to the refreshed alarm and starts from its values; if the alarm is gone, or the
+    // free slot of a new one was taken, there is nothing left to edit and the sheet closes.
+    SideEffect {
+        val open = editing ?: return@SideEffect
+        if (state.read !is AlarmsRead.Loaded) return@SideEffect
+        val (alarm, isNew) = open
+        val now = state.alarms.firstOrNull { it.index == alarm.index }
+        editing = when {
+            isNew -> if (now == null) open else null
+            now == null -> null
+            now != alarm -> now to false
+            else -> open
+        }
+    }
+    val scope = rememberCoroutineScope()
     editing?.let { (alarm, isNew) ->
-        AlarmSheet(
-            alarm, isNew,
-            onSave = { vm.save(it, isNew); editing = null },
-            onDelete = { vm.delete(alarm); editing = null },
-            onDismiss = { editing = null },
-        )
+        // The sheet closes only when the strap took the change; a failure or a busy strap leaves it open for another try.
+        key(alarm, isNew) {
+            AlarmSheet(
+                alarm, isNew, busy = state.busy,
+                onSave = { edited -> scope.launch { if (vm.save(edited, isNew).await()) editing = null } },
+                onDelete = { scope.launch { if (vm.delete(alarm).await()) editing = null } },
+                onDismiss = { editing = null },
+            )
+        }
     }
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
         item { PageHeader(stringResource(R.string.you_alarms_title), onBack) }
@@ -156,6 +179,8 @@ fun AlarmsScreen(
             item { PagePanel { PageNote(stringResource(R.string.you_alarms_reading)) } }
             return@ScreenList
         }
+        // Never read: the alarms are unknown, not empty, so the error above is all there is to show.
+        if (state.read is AlarmsRead.Failed) return@ScreenList
         item {
             AlarmsPanel(state, onToggle = vm::setEnabled, onEdit = { editing = it to false }, onAdd = {
                 vm.freeIndex()?.let { editing = Alarm(it, 7, 0, Alarm.WEEKDAYS, enabled = true) to true }
@@ -287,7 +312,7 @@ private fun HeartAlertsPanel(state: AlarmsUiState, vm: AlarmsViewModel) {
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AlarmSheet(alarm: Alarm, isNew: Boolean, onSave: (Alarm) -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
+private fun AlarmSheet(alarm: Alarm, isNew: Boolean, busy: Boolean, onSave: (Alarm) -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
     val time = rememberTimePickerState(alarm.hour, alarm.minute, is24Hour = ClockSetting.use24Hour)
     var days by remember { mutableIntStateOf(alarm.days) }
     PageSheet(onDismiss, stringResource(if (isNew) R.string.you_alarms_new else R.string.you_alarms_edit), note = daysLabel(days)) {
@@ -306,12 +331,13 @@ private fun AlarmSheet(alarm: Alarm, isNew: Boolean, onSave: (Alarm) -> Unit, on
             PageButton(
                 stringResource(R.string.you_action_save),
                 { onSave(alarm.copy(hour = time.hour, minute = time.minute, days = days, enabled = true)) }, Modifier.weight(1f),
-                primary = true,
+                enabled = !busy, primary = true,
             )
         }
         if (!isNew) {
             PageTextButton(
-                stringResource(R.string.you_alarms_delete), onDelete, Modifier.align(Alignment.CenterHorizontally), color = DestructiveInk,
+                stringResource(R.string.you_alarms_delete), onDelete, Modifier.align(Alignment.CenterHorizontally),
+                enabled = !busy, color = DestructiveInk,
             )
         }
     }

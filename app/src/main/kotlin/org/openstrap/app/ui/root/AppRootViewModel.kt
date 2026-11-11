@@ -74,7 +74,8 @@ sealed interface FirstScoreDay {
 }
 
 /** The day shown's own extras: the check-in. The strap's score comes with its Recovery ([RecoveryResult.strapScore]). */
-data class DayExtras(val checkIn: Int? = null)
+/** The check-in of [date], null while that day's is read. */
+data class DayExtras(val date: LocalDate? = null, val checkIn: Int? = null)
 
 /** A badge past history earned, with the weekly goal it was earned at when it is a goal badge. */
 data class EarnedBadge(val badge: Rewards.Badge, val goal: Int?)
@@ -190,7 +191,7 @@ class AppRootViewModel(
 
     /** The day shown's check-in, from [dayShown]. */
     val dayExtras: StateFlow<DayExtras> = shownDay.filterNotNull().flatMapLatest { date ->
-        health.checkIn(date).map { DayExtras(it?.feeling) }
+        health.checkIn(date).map { DayExtras(date, it?.feeling) }
     }.state(DayExtras())
 
     init {
@@ -259,10 +260,19 @@ class AppRootViewModel(
     suspend fun summaryRewards(start: Long): SummaryRewards? =
         catching { rewards.summary(start, workouts.value, goals.value.workoutsPerWeek) }.getOrNull()
 
-    /** The manual copy and auto sync write with these. The calorie ones are optional but asked for until granted. */
+    /**
+     * The manual copy and auto sync write with these. Only the needed permissions decide: the optional ones are asked
+     * for in the same screen when the needed ones are missing, and never again by themselves.
+     */
     suspend fun healthConnectWrite(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
-        healthConnect.hasRequestedPermissions() -> HcState.Granted
+        healthConnect.hasPermissions() -> HcState.Granted
         else -> HcState.Needs(healthConnect.requestedPermissions)
+    }
+
+    /** Just the optional permissions, for the Health Connect page's offer to ask again. Granted when nothing is left to ask. */
+    suspend fun healthConnectOptional(): HcState = HcState.blocked(healthConnect.availability()) ?: when {
+        healthConnect.hasOptionalPermissions() -> HcState.Granted
+        else -> HcState.Needs(healthConnect.optionalPermissions)
     }
 
     suspend fun healthConnectRead(): HcState = HcState.blocked(healthConnect.availability()) ?: when {

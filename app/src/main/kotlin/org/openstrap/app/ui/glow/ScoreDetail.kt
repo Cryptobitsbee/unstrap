@@ -16,8 +16,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -28,7 +26,9 @@ import org.openstrap.app.presentation.chargeShown
 import org.openstrap.app.data.DailyMetric
 import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
+import org.openstrap.app.ui.components.dayHeld
 import org.openstrap.app.ui.components.detailNumber
+import org.openstrap.app.ui.components.rememberDayHold
 import org.openstrap.app.ui.dashboard.ActivityHistory
 import org.openstrap.app.ui.dashboard.DailyHistory
 import org.openstrap.app.ui.dashboard.DayUiState
@@ -44,7 +44,6 @@ import org.openstrap.app.presentation.TabCopy
 import org.openstrap.app.presentation.TodayCopy
 import org.openstrap.app.ui.theme.MetricColors
 import java.time.LocalDate
-import kotlinx.coroutines.delay
 import java.time.LocalTime
 import org.openstrap.app.ui.glow.draw.DotSize
 import org.openstrap.app.ui.glow.pictures.PictureSize
@@ -72,6 +71,7 @@ fun GlowScoreDetailScreen(
     onSelectDay: (LocalDate) -> Unit,
     contentPadding: PaddingValues,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
     /** For the Activity details: the workouts, each day's Heart points and stored calories, and the way to the profile. */
     workouts: List<org.openstrap.app.data.WorkoutAnalysis> = emptyList(),
     activity: ActivityHistory = ActivityHistory(),
@@ -84,11 +84,12 @@ fun GlowScoreDetailScreen(
     val r = recovery?.takeIf { it.date == state.date }
     // The day shown failed, so its result is never coming: nothing is held for it.
     val failed = recoveryFailure?.date == state.date
-    // Recovery, Load and Active minutes are read from the day's result, which takes a moment to work out on another
-    // day. Until it comes, their page stays on the last day's, so it moves to the next instead of emptying and filling;
-    // the strip follows the tap at once. Energy holds its own, with its curve. The strap's score is held with its day,
-    // as it stands in for Recovery while the score is learning: else the held page would lose its number meanwhile.
-    val held = rememberHeld(r?.let { HeldDay(state, it, strapScore) }, state.date, failed)
+    // Recovery, Energy, Load and Active minutes are read from the day's result, which takes a moment to work out on
+    // another day. For a moment their page stays on the last day's, dimmed, so a quick day doesn't flash; then the
+    // placeholder, never another day's numbers for long ([rememberDayHold]). The strip follows the tap at once. The
+    // strap's score is held with its day, as it stands in for Recovery while the score is learning.
+    val hold = rememberDayHold(r?.let { HeldDay(state, it, strapScore) }, state.date, failed)
+    val held = hold.value
     val heldState = held?.state ?: state
     val heldR = held?.result
     val heldStrapScore = if (held != null) held.strapScore else strapScore
@@ -96,18 +97,23 @@ fun GlowScoreDetailScreen(
         s, result, workouts, activity, history, onOpen, onSwitch, onSelectDay, onEditProfile, contentPadding, onBack,
         stripDate = state.date,
     )
-    when (score) {
+    Box(modifier.dayHeld(hold.pending && score in HELD_SCORES)) { when (score) {
         Score.Recovery -> RecoveryDetail(
             heldState, heldR, heldStrapScore, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, state.date,
         )
-        Score.Energy -> ChargeDetail(state, r, failed, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
+        Score.Energy -> ChargeDetail(
+            held?.state ?: state, heldR, state.date, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack,
+        )
         Score.Sleep -> SleepScoreDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack, sleepEditing)
         Score.Regularity -> RegularityDetail(state, r, history, onOpen, onSwitch, onSelectDay, contentPadding, onBack)
         Score.Naps -> NapsDetail(state, r, onOpen, onSwitch, onSelectDay, contentPadding, onBack, sleepEditing)
         Score.ActiveMinutes, Score.Load -> ActivityScoreDetail(score, activityOf(heldState, heldR))
         Score.HeartPoints, Score.Vo2Max, Score.Recover, Score.Calories, Score.Distance -> ActivityScoreDetail(score, activityOf(state, r))
-    }
+    } }
 }
+
+/** The details whose page is held for a moment on a day switch ([rememberDayHold]). */
+private val HELD_SCORES = setOf(Score.Recovery, Score.Energy, Score.ActiveMinutes, Score.Load)
 
 /** The days a metric has data for, from the day after [from] to [to]; none when [from] isn't before [to]. */
 @Composable
@@ -259,14 +265,10 @@ private const val SHORT_CURVE_HOURS = 3f
  */
 @Composable
 private fun ChargeDetail(
-    liveState: DayUiState, liveR: RecoveryResult?, failed: Boolean, history: DailyHistory,
+    state: DayUiState, r: RecoveryResult?, stripDate: LocalDate, history: DailyHistory,
     onOpen: (Detail) -> Unit, onSwitch: (Detail) -> Unit, onSelectDay: (LocalDate) -> Unit, contentPadding: PaddingValues, onBack: () -> Unit,
 ) {
-    // Another day's Energy takes a moment to work out. Until it is, the last one stays up, so the page moves from one day's
-    // to the next instead of emptying and filling; the strip follows the tap at once. A day that [failed] isn't waited for.
-    val held = rememberHeld(liveR?.let { liveState to it }, liveState.date, failed)
-    val state = held?.first ?: liveState
-    val r = held?.second
+    // [state] and [r] are the day held for a moment by [ScoreDetail] ([rememberDayHold]); the strip follows [stripDate].
     val c = r?.charge
     val now = c?.latest?.let(::chargeShown)
     val atWake = c?.atWake?.toInt()
@@ -276,7 +278,7 @@ private fun ChargeDetail(
     var scrub by remember(state.date) { mutableStateOf<DetailHeadline?>(null) }
     var info by rememberSaveable { mutableStateOf(false) }
     // Charge runs on heart rate, so the days with heart rate are the days with a Charge.
-    val strip = DetailCopy.strip(liveState.date, today, emptySet())
+    val strip = DetailCopy.strip(stripDate, today, emptySet())
     val withData = daysWithData(DailyMetric.HeartRate, strip.first().date.minusDays(1), strip.last().date, history)
     // The latest Charge is where the curve ends, which can be well before now while the strap catches up.
     val lastAt = c?.points?.lastOrNull { it.state != Recovery.State.NoData }?.t
@@ -305,7 +307,7 @@ private fun ChargeDetail(
     DetailTemplate(
         Score.Energy.title, color, siblings(Detail.OfScore(Score.Energy), onSwitch), onInfo = { info = true }, onBack = onBack,
         contentPadding = contentPadding, headline = headline,
-        strip = DetailCopy.strip(liveState.date, today, withData), onDay = onSelectDay,
+        strip = DetailCopy.strip(stripDate, today, withData), onDay = onSelectDay,
         ranges = listOf(Range.Day), range = Range.Day, onRange = {}, scrubbed = { scrub },
         // The figures are the held day's, so they move when it does, not with the strip.
         headlineDay = state.date,
@@ -363,31 +365,7 @@ private fun ChargeDetail(
     )
 }
 
-/**
- * [value] while there is one, else the last there was, so a day that is slow to work out is waited for. Not when the
- * day [failed]: its value is never coming, so it lets go at once rather than leave another day's page up. Not past
- * [HOLD_MS] either, for a day that never comes without a failure saying so. Null before the first.
- */
-@Composable
-private fun <T : Any> rememberHeld(value: T?, day: LocalDate, failed: Boolean): T? {
-    val last = remember { Last<T>() }
-    var gaveUp by remember(day) { mutableStateOf(false) }
-    LaunchedEffect(day, value == null) {
-        gaveUp = false
-        if (value == null) {
-            delay(HOLD_MS)
-            gaveUp = true
-        }
-    }
-    SideEffect { if (value != null) last.value = value }
-    return value ?: last.value.takeUnless { gaveUp || failed }
-}
-
-private const val HOLD_MS = 4_000L
-
-private class Last<T : Any> { var value: T? = null }
-
-/** A day's page as [rememberHeld] keeps it: the day, its result, and the strap's own score for its night. */
+/** A day's page as [rememberDayHold] keeps it: the day, its result, and the strap's own score for its night. */
 private class HeldDay(val state: DayUiState, val result: RecoveryResult, val strapScore: Int?)
 
 /* ---------------------------------------------- Related --------------------------------------------- */

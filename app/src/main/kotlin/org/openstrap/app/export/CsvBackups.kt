@@ -39,16 +39,17 @@ class CsvBackups(
      */
     override suspend fun writeZip(out: OutputStream) {
         val json = SettingsBackup.toJson(settings.backupValues(SettingsBackup::carries))
-        withContext(io) {
+        // The same lock as the automatic backup and restore (the automatic one calls this while holding it).
+        DataJobs.exclusive { withContext(io) {
             val snapshot = catching { BackupSnapshot.take(context, database) }
                 .onFailure { warn("backup: no copy of the database to read, reading it as it goes: $it") }
                 .getOrNull()
             snapshot.use { (it?.let { s -> CsvExporter(s.database.healthDao()) } ?: csv).exportZip(out, settings = json) }
-        }
+        } }
     }
 
     override suspend fun importCsv(from: Uri): BackupResult = catching {
-        val result = withContext(io) { input(from).use { CsvImporter(database).importZip(it) } }
+        val result = DataJobs.exclusive { withContext(io) { input(from).use { CsvImporter(database).importZip(it) } } }
         // A damaged settings file costs the settings only, not the records already restored.
         val restored = result.settings?.let { json ->
             catching { settings.restoreValues(SettingsBackup.fromJson(json), SettingsBackup::missing) }

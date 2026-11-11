@@ -19,8 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.openstrap.app.OpenStrapApp
@@ -59,11 +57,11 @@ class AutoBackup(
         data class Failed(val failure: BackupFailure) : Outcome
     }
 
-    suspend fun run(): Outcome = lock.withLock {
-        val folder = settings.backup.first().folder ?: return@withLock Outcome.Off
+    suspend fun run(): Outcome = DataJobs.exclusive {
+        val folder = settings.backup.first().folder ?: return@exclusive Outcome.Off
         // Until the session has looked for a workout left recording, Idle doesn't mean none.
         withTimeoutOrNull(10_000) { restored.first { it } }
-        if (workout.value is WorkoutState.Recording) return@withLock Outcome.Recording
+        if (workout.value is WorkoutState.Recording) return@exclusive Outcome.Recording
         val now = System.currentTimeMillis() / 1000
         catching {
             val name = withContext(Dispatchers.IO) { write(Uri.parse(folder)) }
@@ -161,9 +159,6 @@ class AutoBackup(
     }
 
     companion object {
-        /** One backup at a time, the daily one and Back up now alike. */
-        private val lock = Mutex()
-
         private const val DAILY = "auto-backup"
         private const val AFTER_WORKOUT = "auto-backup-retry"
         private const val TEMP_MIME = "application/octet-stream"

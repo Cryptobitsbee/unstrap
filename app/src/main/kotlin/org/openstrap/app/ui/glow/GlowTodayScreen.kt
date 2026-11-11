@@ -208,7 +208,7 @@ fun GlowTodayScreen(
     val now = Instant.now()
     val isToday = state.date == now.atZone(zone).toLocalDate()
     org.openstrap.app.ui.components.HoldLiveHeartRate(isToday)
-    val rec = recovery?.takeIf { it.date == state.date }
+    val rec = recovery
     val lastWorkout = workouts.maxByOrNull { it.end }
     val ctx = TodayContext(
         state, rec, liveHeartRate, workouts, lastWorkout, isToday, now.epochSecond, zone, moment,
@@ -217,7 +217,7 @@ fun GlowTodayScreen(
         stuck = strap.paired && syncStuck(isToday, state.asleepSeconds != null, strap.record.failingSince, now.epochSecond, zone),
         strapScore = strapScore,
         stopped = strap.stopped, staleAfter = strap.staleAfter,
-        recoveryFailure = recoveryFailure?.takeIf { it.date == state.date && rec == null },
+        recoveryFailure = recoveryFailure?.takeIf { rec == null },
         partial = partialTag.takeIf { wear?.partial == true },
         firstScore = firstScore,
     )

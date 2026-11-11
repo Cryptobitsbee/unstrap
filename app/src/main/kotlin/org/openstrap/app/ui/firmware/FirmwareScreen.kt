@@ -248,6 +248,9 @@ fun ZeppAccountScreen(vm: FirmwareViewModel, contentPadding: PaddingValues, onBa
     }
 }
 
+/** What the Zepp account panel is doing: one value, so editing the token and signing in can't both be on. */
+private enum class AccountMode { Idle, EditingToken, SigningIn }
+
 @Composable
 private fun AccountPanel(
     account: ZeppAccount?,
@@ -256,18 +259,17 @@ private fun AccountPanel(
     onClear: () -> Unit,
     onSignIn: (DeviceListing, BoundDevice?) -> Unit,
 ) {
-    var editing by rememberSaveable { mutableStateOf(false) }
-    var signIn by rememberSaveable { mutableStateOf(false) }
-    if (signIn) {
+    var mode by rememberSaveable { mutableStateOf(AccountMode.Idle) }
+    if (mode == AccountMode.SigningIn) {
         ZeppSignInDialog(
             preferredApiBase = account?.apiBase,
             confirmLabel = stringResource(R.string.you_zepp_save_sign_in),
-            onDismiss = { signIn = false },
-            onConfirm = { listing, strap -> signIn = false; onSignIn(listing, strap) },
+            onDismiss = { mode = AccountMode.Idle },
+            onConfirm = { listing, strap -> mode = AccountMode.Idle; onSignIn(listing, strap) },
         )
     }
     PagePanel {
-        if (!editing) {
+        if (mode != AccountMode.EditingToken) {
             Body(
                 when {
                     account == null -> stringResource(R.string.you_zepp_account_none)
@@ -276,12 +278,14 @@ private fun AccountPanel(
                 },
             )
             PageButton(
-                stringResource(if (account == null) R.string.you_pair_sign_in else R.string.you_zepp_sign_in_again), { signIn = true },
+                stringResource(if (account == null) R.string.you_pair_sign_in else R.string.you_zepp_sign_in_again),
+                { mode = AccountMode.SigningIn },
                 Modifier.fillMaxWidth(), enabled = enabled, primary = true,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PageButton(
-                    stringResource(if (account == null) R.string.you_zepp_paste_token else R.string.you_zepp_edit), { editing = true },
+                    stringResource(if (account == null) R.string.you_zepp_paste_token else R.string.you_zepp_edit),
+                    { mode = AccountMode.EditingToken },
                     Modifier.weight(1f), enabled = enabled,
                 )
                 if (account != null) {
@@ -292,10 +296,12 @@ private fun AccountPanel(
             }
             return@PagePanel
         }
-        var token by rememberSaveable { mutableStateOf("") }
-        var user by rememberSaveable { mutableStateOf(account?.userId.orEmpty()) }
-        var api by rememberSaveable { mutableStateOf(account?.apiBase ?: ZeppAccount.DEFAULT_API_BASE) }
-        var china by rememberSaveable { mutableStateOf(account?.china == true) }
+        // Keyed on the account, so a fresh sign-in or renewed token starts the fields again from it and a stale copy
+        // can't be written back over it. The pasted token is the secret: plain remember, so it never reaches the saved state.
+        var token by remember(account) { mutableStateOf("") }
+        var user by rememberSaveable(account) { mutableStateOf(account?.userId.orEmpty()) }
+        var api by rememberSaveable(account) { mutableStateOf(account?.apiBase ?: ZeppAccount.DEFAULT_API_BASE) }
+        var china by rememberSaveable(account) { mutableStateOf(account?.china == true) }
         PageField(
             token, { token = it }, stringResource(R.string.you_zepp_app_token), Modifier.fillMaxWidth(),
             placeholder = if (account != null) stringResource(R.string.you_zepp_keep_token) else null,
@@ -310,10 +316,10 @@ private fun AccountPanel(
             stringResource(R.string.you_zepp_china), stringResource(R.string.you_zepp_china_note), china, { china = it }, divider = false,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PageButton(stringResource(R.string.you_action_cancel), { editing = false }, Modifier.weight(1f))
+            PageButton(stringResource(R.string.you_action_cancel), { mode = AccountMode.Idle }, Modifier.weight(1f))
             PageButton(
                 stringResource(R.string.you_action_save),
-                { onSave(token.ifBlank { account?.appToken.orEmpty() }, user, api, china); editing = false }, Modifier.weight(1f),
+                { onSave(token.ifBlank { account?.appToken.orEmpty() }, user, api, china); mode = AccountMode.Idle }, Modifier.weight(1f),
                 enabled = token.isNotBlank() || account != null, primary = true,
             )
         }

@@ -102,7 +102,7 @@ fun GlowSleepScreen(
     onRestore: (org.openstrap.app.data.db.SleepSession) -> Unit = {},
 ) {
     val list = rememberLazyListState()
-    val rec = recovery?.takeIf { it.date == state.date }
+    val rec = recovery
     val breathing = rec?.breathingDisturbances
     // Before the strap has seen a night, cards keep their shape and wait (spec 4.3): breathing disturbances too.
     val firstNights = rec != null && !rec.charge.anchored && state.sleep == null

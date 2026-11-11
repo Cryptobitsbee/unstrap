@@ -26,6 +26,6 @@ fun WorkoutCopy.readyHero(connection: ConnectionState, bpm: Int?, strings: Strin
         ReadyHero(strings.get(R.string.workout_ready_connecting), strings.get(R.string.workout_ready_anyway), live = false)
     ConnectionState.NotPaired ->
         ReadyHero(strings.get(R.string.workout_ready_not_paired), strings.get(R.string.workout_ready_anyway), live = false)
-    ConnectionState.Disconnected, is ConnectionState.Failed ->
+    ConnectionState.Disconnected, ConnectionState.BluetoothOff, is ConnectionState.Failed ->
         ReadyHero(strings.get(R.string.workout_ready_not_connected), strings.get(R.string.workout_ready_anyway), live = false)
 }

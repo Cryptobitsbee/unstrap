@@ -89,9 +89,10 @@ class StrapManager(
                 connected(job, session)
             }
             override fun onLinkEnded() {
-                buzzer.endFind()
+                buzzer.linkEnded()
                 onWear(null)
                 live.onLinkEnded()
+                commands.forgetAlarmCaps()
             }
         },
     )
@@ -151,6 +152,10 @@ class StrapManager(
      * failed step is logged and setup goes on without it.
      */
     private suspend fun afterAuth(client: GattClient, s: ChannelSession) {
+        // Facts of the last connection, so a step that fails here shows as unknown rather than as an old value.
+        battery = null
+        charging = false
+        firmware = null
         clock.queryVersion(s)
         clock.setOnConnect(s, client)
         querySettingsVersion(s)
@@ -328,6 +333,18 @@ class StrapManager(
         // The app was stopped while it knew the wear state: close that interval now, as nothing is connected yet.
         val now = System.currentTimeMillis() / 1000
         wearEvents.post { if (dao.lastWearEvent()?.worn != null) dao.insertWearEvent(WearEventRow(now, null)) }
+        // Forget: the old strap's facts go with it, so the Device page can't show them for the next one.
+        scope.launch {
+            settings.pairedDevice.map { it != null }.distinctUntilChanged().collect { paired ->
+                if (paired) return@collect
+                info.value = null
+                todaySteps.value = null
+                battery = null
+                charging = false
+                firmware = null
+                commands.forgetAlarmCaps()
+            }
+        }
         // For the widgets' status line with the strap away: the battery and charging as last connected.
         scope.launch {
             connection.mapNotNull { c -> (c as? ConnectionState.Connected)?.let { it.batteryPercent?.let { b -> b to it.charging } } }
@@ -539,6 +556,14 @@ class StrapManager(
             s.messagesFor(Endpoints.REALTIME_ACTIVITY).collect { p ->
                 val totals = RealtimeSteps.parseMessage(p)
                 if (totals == null) log("steps < ${p.toHex()}")
+                // Zepp's `yt00` on a step push (`mgk`): in the background with no phone workout, notify goes off, so a
+                // workout that ended behind the app doesn't leave the strap pushing steps.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (StepsNotify.offOnPush(p, appVisible, workoutActive, now - stepsOffAt)) {
+                    stepsOffAt = now
+                    log("steps: push in the background, notify off")
+                    stepsNotify(s, on = false)
+                }
                 totals?.let {
                     if (todaySteps.value?.isPlausible != it.isPlausible) {
                         log("steps today=${it.steps} dist=${it.distanceMeters} kcal=${it.calories}" + if (!it.isPlausible) " (total doesn't match distance: counting from synced history)" else "")
@@ -662,6 +687,9 @@ class StrapManager(
     @Volatile private var workoutActive = false
     private var stepsJob: kotlinx.coroutines.Job? = null
 
+    /** When a step push last turned notify off, for Zepp's 1.5 s per-state debounce. */
+    private var stepsOffAt = Long.MIN_VALUE / 2
+
     override fun setWorkoutActive(active: Boolean) {
         workoutActive = active
         live.setWorkoutActive(active)
@@ -741,7 +769,8 @@ class StrapManager(
         try {
             // A failure is logged and handed on to the Firmware page. A cancellation is rethrown by catching as it came.
             catching {
-                if (live.isRunning) live.pause()
+                // The stream follows firmwareUpdating off on its own; this waits until the strap has been told.
+                live.pause()
                 // Zepp asks for high connection priority only for a firmware transfer (`f4c`), never on a normal link.
                 client.requestHighPriority()
                 val link = GattDfuLink(client)
@@ -763,9 +792,25 @@ class StrapManager(
     private companion object {
         const val MTU_PUSH = 0x02
         const val STEPS_NOTIFY_REPLY = 0x06
-        const val STEPS_DEBOUNCE_MS = 1_500L
+        const val STEPS_DEBOUNCE_MS = StepsNotify.DEBOUNCE_MS
         const val BATTERY_RETRY_MS = 2_000L
         const val SENT_PROFILE = "profile_crc"
         const val SENT_CALORIE_GOAL = "calorie_goal"
+    }
+}
+
+/** Zepp's RealtimeStepService (`yt00`) rule for a step push, kept apart so it can be tested. */
+internal object StepsNotify {
+    /** Zepp's debounce per notify state (`yt00.j`). */
+    const val DEBOUNCE_MS = 1_500L
+    private const val PUSH = 0x07
+
+    /**
+     * Whether a message on 0x0016 is a step push (`07`) that turns notify off, as Zepp does on its `mgk` event: the app
+     * behind, no phone workout recording, and no off sent in the last [DEBOUNCE_MS].
+     */
+    fun offOnPush(payload: ByteArray, appVisible: Boolean, workoutActive: Boolean, sinceLastOffMs: Long): Boolean {
+        if (payload.isEmpty() || payload.u8(0) != PUSH) return false
+        return !appVisible && !workoutActive && sinceLastOffMs >= DEBOUNCE_MS
     }
 }

@@ -117,8 +117,8 @@ fun GlowRecoveryScreen(
 ) {
     val list = rememberLazyListState()
     val signals = rememberSignals(state)
-    val r = recovery?.takeIf { it.date == state.date }
-    val failure = recoveryFailure?.takeIf { it.date == state.date && r == null }
+    val r = recovery
+    val failure = recoveryFailure?.takeIf { r == null }
     val learning = r?.readiness?.calibrating == true
     val firstNights = r != null && !r.charge.anchored
     val waiting = if (firstNights) AFTER_FIRST_NIGHT else NO_READING

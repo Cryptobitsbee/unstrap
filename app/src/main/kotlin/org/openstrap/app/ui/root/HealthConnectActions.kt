@@ -13,13 +13,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.health.connect.client.PermissionController
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import org.openstrap.app.data.catching
 import org.openstrap.app.health.HcAvailability
 import org.openstrap.app.ui.device.BackupCopy
 import org.openstrap.app.ui.device.DeviceViewModel
@@ -47,6 +50,10 @@ internal class HealthConnectActions(
     val export: () -> Unit,
     /** Auto sync on or off. */
     val auto: (Boolean) -> Unit,
+    /** True while Health Connect is there and the optional permissions (calories, breathing rate, VO2 max) are not granted: the page offers them again. */
+    val caloriesMissing: Boolean,
+    /** Asks for just the optional permissions. */
+    val offerCalories: () -> Unit,
 )
 
 internal val HC_UNAVAILABLE: String get() = Strings.app.get(R.string.day_hc_unavailable)
@@ -69,6 +76,15 @@ internal fun hcMissingMessage(availability: HcAvailability): String =
 internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: DeviceViewModel): HealthConnectActions {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    var caloriesMissing by remember { mutableStateOf(false) }
+    val refreshCalories: () -> Unit = {
+        scope.launch { caloriesMissing = catching { rootVm.healthConnectOptional() }.getOrNull() is HcState.Needs }
+    }
+    // Read again on every return to the app, since the grant can change in Health Connect's own screen.
+    LifecycleResumeEffect(Unit) {
+        refreshCalories()
+        onPauseOrDispose { }
+    }
     var hcForAuto by rememberSaveable { mutableStateOf(false) }
     val hcLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
         val auto = hcForAuto
@@ -82,6 +98,9 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
                 else -> deviceVm.exportHealthConnect()
             }
         }
+    }
+    val hcCalorieLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) {
+        refreshCalories()
     }
     val hcReadLauncher = rememberLauncherForActivityResult(PermissionController.createRequestPermissionResultContract()) { granted ->
         if (rootVm.healthConnectReadGranted(granted)) deviceVm.importHealthConnect()
@@ -100,8 +119,7 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
     // The manual copy, or turning auto sync on ([forAuto]): with the write permissions, asked for first when missing.
     val write: (Boolean) -> Unit = { forAuto ->
         scope.launch {
-            // The optional permissions are asked for again until granted: the launcher goes on with the
-            // ones it needs.
+            // The optional permissions (calories, breathing rate, VO2 max) are asked for only along with the needed ones.
             when (val hc = rootVm.healthConnectWrite()) {
                 HcState.Unavailable -> Toast.makeText(context, HC_UNAVAILABLE, Toast.LENGTH_LONG).show()
                 HcState.Installable -> Toast.makeText(context, HC_INSTALL_FIRST, Toast.LENGTH_LONG).show()
@@ -117,6 +135,17 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
         import = import,
         export = { write(false) },
         auto = { on -> if (on) write(true) else deviceVm.setAutoHealthConnect(false) },
+        caloriesMissing = caloriesMissing,
+        offerCalories = {
+            scope.launch {
+                when (val hc = rootVm.healthConnectOptional()) {
+                    HcState.Unavailable -> Toast.makeText(context, HC_UNAVAILABLE, Toast.LENGTH_LONG).show()
+                    HcState.Installable -> Toast.makeText(context, HC_INSTALL_FIRST, Toast.LENGTH_LONG).show()
+                    HcState.Granted -> caloriesMissing = false
+                    is HcState.Needs -> hcCalorieLauncher.launch(hc.permissions)
+                }
+            }
+        },
     )
 }
 
