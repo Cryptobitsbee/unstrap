@@ -79,6 +79,25 @@ class AppNavStateTest {
     }
 
     @Test
+    fun `You and Strap opened one after the other don't stack, so Back goes home, not to the first`() {
+        val nav = AppNavState()
+        nav.openPage(Page.You)
+        nav.openPage(Page.Strap)
+        assertEquals(listOf(Page.Strap), nav.pages)
+        nav.closePage()
+        assertEquals(emptyList<Page>(), nav.pages)
+    }
+
+    @Test
+    fun `a page opened from a row stacks on its root, and the same page twice opens once`() {
+        val nav = AppNavState()
+        nav.openPage(Page.Strap)
+        nav.openPage(Page.Firmware)
+        nav.openPage(Page.Firmware)
+        assertEquals(listOf(Page.Strap, Page.Firmware), nav.pages)
+    }
+
+    @Test
     fun `back from a tab goes to the tab before, then Today, and Today's root is home`() {
         val nav = AppNavState(AppNavState.Snapshot(tab = TabNav(Tab.Activity.ordinal, Tab.Sleep.ordinal)))
         assertEquals(BackResult.Handled, nav.back(false))

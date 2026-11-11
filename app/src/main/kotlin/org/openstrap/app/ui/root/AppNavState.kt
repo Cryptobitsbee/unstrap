@@ -187,7 +187,13 @@ class AppNavState(initial: Snapshot = Snapshot()) {
 
     /** Opens [page] over the tab, unless it's already on top. */
     fun openPage(page: Page) {
-        if (pages.lastOrNull() != page) pages = pages + page
+        pages = when {
+            // You and Strap are roots, opened from a tab's header: one replaces the other rather than stack on it. Two
+            // taps landing during the page's slide-in stacked [You, Strap], and Back then went to You (audit S21).
+            page in ROOT_PAGES -> listOf(page)
+            pages.lastOrNull() == page -> pages
+            else -> pages + page
+        }
     }
 
     /** Closes the top page. */
@@ -365,6 +371,8 @@ class AppNavState(initial: Snapshot = Snapshot()) {
     fun snapshot(): Snapshot = Snapshot(tab, pages, stacks, allMetricsOpen, editGoals, addingOn, savingStretch, workout)
 
     companion object {
+        /** The pages a tab's header opens, each the root of the pages over the tab. */
+        private val ROOT_PAGES = setOf(Page.You, Page.Strap)
         private const val TAB = "tab"
         private const val PAGES = "pages"
         private const val STACK = "stack."

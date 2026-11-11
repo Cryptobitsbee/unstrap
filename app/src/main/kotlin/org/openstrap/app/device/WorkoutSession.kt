@@ -426,6 +426,29 @@ class WorkoutSession(
     private var keepAlive: Job? = null
 
     /**
+     * A STOP or ABANDON that didn't reach the strap (out of range, Bluetooth off). The strap keeps that session running
+     * and sends its frames, which then lead the live heart rate (audit S11, seen 2026-11-11), so the next connect with
+     * nothing recording sends it once ([resendEnd]). A new START replaces it.
+     */
+    private class UnsentEnd(val state: org.openstrap.protocol.services.SportSession.State, val w: AppWorkout, val elapsed: Long)
+    @Volatile private var unsentEnd: UnsentEnd? = null
+
+    init {
+        scope.launch {
+            strap.connection.map { it is ConnectionState.Connected }.distinctUntilChanged().collect { if (it) resendEnd() }
+        }
+    }
+
+    private suspend fun resendEnd() {
+        val e = unsentEnd ?: return
+        if (_state.value is WorkoutState.Recording) return
+        log("strap session: the ${e.state} that didn't go out goes now")
+        catching { strap.sportSession(e.state, e.w.sportType, e.w.start, e.elapsed, reconnect = false) }
+            .onSuccess { if (unsentEnd === e) unsentEnd = null }
+            .onFailure { log("strap session ${e.state} not sent again: ${it.message}") }
+    }
+
+    /**
      * Tells the strap's sport module, when that's on; a failure is logged and the phone recording carries on. [send]
      * false when the strap made the change itself: nothing goes out, but a pause still gets its keep-alive.
      */
@@ -437,9 +460,16 @@ class WorkoutSession(
     ) {
         if (!strapSessions) return
         val elapsed = WorkoutRecorder.activeSeconds(w, now())
+        val end = state == org.openstrap.protocol.services.SportSession.State.STOP ||
+            state == org.openstrap.protocol.services.SportSession.State.ABANDON
+        if (state == org.openstrap.protocol.services.SportSession.State.START) unsentEnd = null
         if (send) scope.launch {
             catching { strap.sportSession(state, w.sportType, w.start, elapsed, reconnect) }
-                .onFailure { (strap as? StrapManager)?.log("strap session $state not sent: ${it.message}") }
+                .onSuccess { if (end) unsentEnd = null }
+                .onFailure {
+                    (strap as? StrapManager)?.log("strap session $state not sent: ${it.message}")
+                    if (end) unsentEnd = UnsentEnd(state, w, elapsed)
+                }
         }
         keepAlive?.cancel()
         // While paused, Zepp sends the module a keep-alive every 5 s.

@@ -159,6 +159,36 @@ class WorkoutSessionTest {
 
     /** Zepp's `bo60.j(2)` on a reconnect: the config, then PAUSE while paused, RESUME once resumed, else START. */
     @Test
+    fun anEndThatDidNotReachTheStrapGoesOnTheNextConnectOnce() {
+        val s = session()
+        val connected = ConnectionState.Connected(80, "3.27.0.1")
+        strap.connection.value = connected
+        s.start(sportType = 24)
+        s.recording()
+        clock.advance(Duration.ofSeconds(120))
+        // Out of range: the STOP fails.
+        strap.connection.value = ConnectionState.Disconnected
+        strap.sportFails = true
+        s.end()
+        s.state.await { it !is WorkoutState.Recording }
+        runBlocking { withTimeout(WAIT_MS) { while (strap.sportStates.none { it.first == SportSession.State.STOP }) delay(POLL_MS) } }
+        strap.sportFails = false
+        strap.sportStates.clear()
+        // Back in range: the STOP goes once, with nothing recording.
+        strap.connection.value = connected
+        runBlocking { withTimeout(WAIT_MS) { while (strap.sportStates.isEmpty()) delay(POLL_MS) } }
+        Thread.sleep(SETTLE_MS)
+        assertEquals(listOf(SportSession.State.STOP to false), strap.sportStates.toList())
+        // And not again on the next connect.
+        strap.sportStates.clear()
+        strap.connection.value = ConnectionState.Connecting
+        Thread.sleep(SETTLE_MS)
+        strap.connection.value = connected
+        Thread.sleep(SETTLE_MS)
+        assertTrue(strap.sportStates.isEmpty())
+    }
+
+    @Test
     fun reconnectSendsTheConfigAndOneStateAsZepp() {
         val s = session()
         strap.connection.value = ConnectionState.Connected(80, "3.27.0.1")
@@ -1027,7 +1057,11 @@ class WorkoutSessionTest {
         override suspend fun buzz(pattern: List<Int>) = Unit
         override suspend fun sportSession(state: SportSession.State, sportType: Int, startTime: Long, elapsedSeconds: Long, reconnect: Boolean) {
             sportStates += state to reconnect
+            if (sportFails) throw IllegalStateException("not connected")
         }
+
+        /** Every sport command fails, as with the strap out of range. */
+        @Volatile var sportFails = false
 
         val sportStates: MutableList<Pair<SportSession.State, Boolean>> = Collections.synchronizedList(mutableListOf())
         override suspend fun sportSessionKeepAlive() = Unit
