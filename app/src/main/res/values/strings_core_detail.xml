@@ -58,6 +58,8 @@
     <string name="core_detail_label_bpm_now">bpm now</string>
     <string name="core_detail_label_bpm_latest">bpm, latest</string>
     <string name="core_detail_label_bpm_resting">bpm resting</string>
+    <!-- The label under a resting heart rate unstrap worked out itself, because the strap sent none for the day. -->
+    <string name="core_detail_label_bpm_resting_estimated">bpm resting, estimated</string>
     <string name="core_detail_label_steps_today">steps so far today</string>
     <string name="core_detail_label_steps">steps</string>
     <!-- br/min is breaths a minute. -->
@@ -66,6 +68,15 @@
     <string name="core_detail_label_day_average">Day average</string>
     <!-- The label under a value on the Day view, after its unit ("ms", "%", "°C"). -->
     <string name="core_detail_label_unit_day_average"><xliff:g id="unit" example="ms">%1$s</xliff:g>, day average</string>
+    <!-- The label under stress's value on the Day view (no unit): the level of its latest reading of the day, and when it was taken. -->
+    <string name="core_detail_label_stress_latest_at"><xliff:g id="level" example="High">%1$s</xliff:g>, latest at <xliff:g id="time" example="14:05">%2$s</xliff:g></string>
+    <!-- Under skin temperature's level on a day's detail: the signed change from your normal with its unit, and which side of it. -->
+    <string name="core_detail_skin_above"><xliff:g id="change" example="+1.4 °C">%1$s</xliff:g>, above your normal</string>
+    <string name="core_detail_skin_below"><xliff:g id="change" example="−0.7 °C">%1$s</xliff:g>, below your normal</string>
+    <string name="core_detail_skin_within"><xliff:g id="change" example="+0.1 °C">%1$s</xliff:g>, within your normal</string>
+    <!-- The label under blood oxygen's value on the Day view, after its unit: the latest reading of the day, whether it was taken awake or asleep, and when. -->
+    <string name="core_detail_label_unit_daytime_latest_at"><xliff:g id="unit" example="%">%1$s</xliff:g>, daytime, latest at <xliff:g id="time" example="14:05">%2$s</xliff:g></string>
+    <string name="core_detail_label_unit_asleep_latest_at"><xliff:g id="unit" example="%">%1$s</xliff:g>, while asleep, latest at <xliff:g id="time" example="05:10">%2$s</xliff:g></string>
     <!-- The label under the steps for a week, month or year: the daily average. -->
     <string name="core_detail_label_steps_week">steps a day, last 7 days</string>
     <string name="core_detail_label_steps_month">steps a day, last 30 days</string>

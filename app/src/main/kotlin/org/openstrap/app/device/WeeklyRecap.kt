@@ -61,13 +61,20 @@ object WeeklyRecap {
         catching { container.rewards.refreshNow(recordingStart) }.onFailure { Log.w("unstrap", "weekly recap: weeks not refreshed: $it") }
         val weeks = container.database.healthDao().weekResultsOnce()
         val week = weeks.firstOrNull { it.weekStart == lastWeek.toEpochDay() }
-        settings.setRecapWeek(lastWeek.toEpochDay())
-        if (week == null || week.count == 0) return
+        // Nothing to say about a week without a workout, and nothing will change that: done with it.
+        if (week == null || week.count == 0) {
+            settings.setRecapWeek(lastWeek.toEpochDay())
+            return
+        }
         // Android 13 brought the notification permission. Before it, the check would always read as denied.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
-        show(context, RewardsCopy.weekRange(lastWeek), RewardsCopy.recapText(week, Rewards.inARow(weeks, lastWeek)))
+        // Sent once it has been shown: a denied permission or a failed post leaves the week for the next look this morning.
+        val text = RewardsCopy.recapText(week, Rewards.inARow(weeks, lastWeek))
+        val shown = catching { show(context, RewardsCopy.weekRange(lastWeek), text) }
+            .onFailure { Log.w("unstrap", "weekly recap: not shown: $it") }
+        if (shown.isSuccess) settings.setRecapWeek(lastWeek.toEpochDay())
     }
 
     private fun show(context: Context, range: String, text: String) {

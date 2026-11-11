@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -103,15 +104,28 @@ class FirmwareViewModel(
 
     fun reset() { if (!busy) _step.value = FirmwareStep.Idle }
 
-    private val busy get() = _step.value.let { it is FirmwareStep.Checking || it is FirmwareStep.Downloading || it is FirmwareStep.Installing }
+    private val busy get() = _step.value.isBusy()
 
+    private fun FirmwareStep.isBusy() = this is FirmwareStep.Checking || this is FirmwareStep.Downloading || this is FirmwareStep.Installing
+
+    /**
+     * Moves to [next] only while the step is still the kind [S] this work started in. Work that outlives its step (a
+     * late progress callback, a result after the page was reset) is dropped, so it can't pull the step back.
+     */
+    private inline fun <reified S : FirmwareStep> settle(next: FirmwareStep) {
+        _step.update { if (it is S) next else it }
+    }
+
+    // Each return is a reason the check can't start.
+    @Suppress("ReturnCount")
     fun check() {
+        if (busy) return
         val acc = account.value ?: return fail(strings.get(R.string.you_firmware_no_account))
         val info = strap.info.value
         val firmware = info?.firmware ?: return fail(strings.get(R.string.you_firmware_no_version))
         _step.value = FirmwareStep.Checking
         viewModelScope.launch {
-            _step.value = catching {
+            settle<FirmwareStep.Checking>(catching {
                 val identity = StrapIdentity(
                     firmwareVersion = firmware,
                     hardwareVersion = info.hardware,
@@ -128,7 +142,7 @@ class FirmwareViewModel(
                     cloud.check(current.apiBase, current.appToken, current.userId, identity)
                 }
                 FirmwareStep.Checked(result)
-            }.getOrElse { failed("firmware check", it, strings.get(R.string.you_firmware_check_failed)) }
+            }.getOrElse { failed("firmware check", it, strings.get(R.string.you_firmware_check_failed)) })
         }
     }
 
@@ -147,12 +161,13 @@ class FirmwareViewModel(
 
     /** Downloads the first part in install order and stages it. Further parts follow after the strap restarts. */
     fun download(part: FirmwarePart) {
+        if (busy) return
         val type = part.type ?: return fail(strings.format(R.string.you_firmware_unknown_part, part.prefix))
         _step.value = FirmwareStep.Downloading(part, 0f)
         viewModelScope.launch {
-            _step.value = catching {
+            settle<FirmwareStep.Downloading>(catching {
                 val bytes = cloud.download(part) { done, total ->
-                    if (total > 0) _step.value = FirmwareStep.Downloading(part, done.toFloat() / total)
+                    if (total > 0) settle<FirmwareStep.Downloading>(FirmwareStep.Downloading(part, done.toFloat() / total))
                 }
                 val trailer = HmfwTrailer.read(bytes)
                 FirmwareStep.Ready(
@@ -162,13 +177,14 @@ class FirmwareViewModel(
                         trailer, trailerWarnings(bytes, trailer, type),
                     ),
                 )
-            }.getOrElse { failed("firmware download", it, strings.get(R.string.you_firmware_download_failed)) }
+            }.getOrElse { failed("firmware download", it, strings.get(R.string.you_firmware_download_failed)) })
         }
     }
 
     /** Stages a file the user picked. Only plain firmware images are accepted from files. */
     fun loadFile(uri: Uri) = viewModelScope.launch {
-        _step.value = catching {
+        if (busy) return@launch
+        val next = catching {
             val bytes = withContext(Dispatchers.IO) {
                 val input = openFile(uri) ?: throw FileNotFoundException("no input stream for $uri")
                 input.use { it.readBytes() }
@@ -191,6 +207,8 @@ class FirmwareViewModel(
             log("firmware: file not read: $it")
             FirmwareStep.Failed(strings.get(R.string.you_firmware_file_unread))
         }
+        // The read takes a while: a check, download or install that began meanwhile keeps the step.
+        _step.update { if (it.isBusy()) it else next }
     }
 
     /** Problems that make an image look wrong for this strap (docs/protocol/03 §2.2, advisory). */
@@ -218,25 +236,28 @@ class FirmwareViewModel(
         if (strap.info.value?.dfuAvailable == false) add(strings.get(R.string.system_firmware_no_service))
     }
 
+    // Each return is a reason not to install: one running, updates off, or something blocking it.
+    @Suppress("ReturnCount")
     fun install(image: ReadyImage) {
+        if (busy) return
         if (!UPDATES_ENABLED) return fail(strings.get(R.string.you_firmware_install_failed))
         val blocking = blockers()
         if (blocking.isNotEmpty()) return fail(blocking.joinToString(" "))
         _step.value = FirmwareStep.Installing(strings.get(R.string.you_firmware_step_starting), null)
         viewModelScope.launch {
-            _step.value = catching {
+            settle<FirmwareStep.Installing>(catching {
                 strap.installFirmware(image.bytes, image.type) { p ->
-                    _step.value = when (p) {
+                    settle<FirmwareStep.Installing>(when (p) {
                         is DfuProgress.Transferring -> FirmwareStep.Installing(
                             strings.get(R.string.you_firmware_step_sending), p.sent.toFloat() / p.total,
                         )
                         DfuProgress.Validating -> FirmwareStep.Installing(strings.get(R.string.you_firmware_step_validating), null)
                         DfuProgress.Applying -> FirmwareStep.Installing(strings.get(R.string.you_firmware_step_applying), null)
                         DfuProgress.Done -> FirmwareStep.Installing(strings.get(R.string.you_firmware_step_restarting), 1f)
-                    }
+                    })
                 }
                 FirmwareStep.Installed
-            }.getOrElse { failed("firmware install", it, strings.get(R.string.you_firmware_install_failed)) }
+            }.getOrElse { failed("firmware install", it, strings.get(R.string.you_firmware_install_failed)) })
         }
     }
 
@@ -258,9 +279,8 @@ class FirmwareViewModel(
         const val MIN_BATTERY = 30
 
         /**
-         * Off for now: since firmware 3.27.0.1 the strap's own sleep result is empty or wrong on nights it was worn
-         * (2026-11-07), so no more strap updates until that is understood. The Strap page shows the version without
-         * opening this page, and [install] refuses.
+         * Off for now (since 2026-11-07). The Strap page shows the version without opening this page, and [install]
+         * refuses.
          */
         const val UPDATES_ENABLED = false
     }

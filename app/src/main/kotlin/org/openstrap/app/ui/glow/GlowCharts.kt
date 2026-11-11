@@ -169,6 +169,8 @@ fun GlowLineChart(
     yRange: ClosedFloatingPointRange<Float>? = null,
     /** A usual range drawn as a band of the colour at 12%, no edge lines (e.g. your normal). */
     band: ClosedFloatingPointRange<Float>? = null,
+    /** The readings, by index, to shade lightly behind the line (e.g. the hours asleep); null for none. */
+    shade: IntRange? = null,
     /** How the average label prints a value. */
     format: (Float) -> String = { it.roundToInt().toString() },
     /**
@@ -212,6 +214,11 @@ fun GlowLineChart(
                 val axisLabels = m.measureAll(labels)
                 val h = g.plotBottom
                 onDrawBehind {
+                    if (shade != null) {
+                        val x0 = g.xOf(shade.first)
+                        val box = Size(g.xOf(shade.last) - x0, g.plotBottom - g.top)
+                        drawRect(Color.White.copy(alpha = SHADE_ALPHA), Offset(x0, g.top), box)
+                    }
                     drawLineChartBody(g, paths, color)
 
                     if (average != null) {
@@ -241,6 +248,9 @@ fun GlowLineChart(
             },
     )
 }
+
+/** The hours shaded behind a line chart, in white. */
+private const val SHADE_ALPHA = 0.07f
 
 /** Your normal behind a chart: a band of the ink at 12% (spec 2.7). */
 private const val NormalBandAlpha = ChartInk.NORMAL_BAND_ALPHA

@@ -16,6 +16,9 @@
     <string name="day_nearby_text_location">在 Android 11 上，unstrap 需要位置权限来查找并连接你的手环。应用不会使用你的位置信息。Android 不会再次询问，请在 unstrap 的设置中前往「权限」开启。</string>
     <string name="day_nearby_open_settings">打开设置</string>
     <string name="day_nearby_not_now">暂不</string>
+    <string name="day_location_blocked_text">GPS 运动需要位置权限。Android 不会再次询问，请在 unstrap 的系统设置中开启“权限”。</string>
+    <string name="day_notifications_blocked_title">允许通知</string>
+    <string name="day_notifications_blocked_text">unstrap 通过通知显示运动和手环状态。Android 不会再次询问，请在 unstrap 的系统设置中开启“通知”。</string>
     <string name="day_pull_sync_failed">无法同步。%1$s</string>
     <string name="day_pull_not_connected">手环未连接。</string>
     <string name="day_pull_syncing">正在同步手环…</string>

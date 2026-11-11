@@ -5,13 +5,16 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.openstrap.app.data.History
+import org.openstrap.app.presentation.DetailCopy.Latest
 import org.openstrap.app.presentation.DetailCopy.Level
 import java.time.LocalDate
 import java.util.Locale
+import org.openstrap.app.presentation.localNumber
 import org.openstrap.app.presentation.DaySource
 import org.openstrap.app.presentation.DetailCopy
 import org.openstrap.app.presentation.Metric
 import org.openstrap.app.presentation.Range
+import org.openstrap.app.presentation.StressLevel
 import org.openstrap.app.presentation.daySource
 import org.openstrap.app.presentation.TodayCopy
 
@@ -110,9 +113,38 @@ class DetailCopyTest {
     @Test fun `the label under the value names what it is for the range`() {
         assertEquals("bpm now", DetailCopy.valueLabel(Metric.HeartRate, Range.Day, live = true))
         assertEquals("ms, day average", DetailCopy.valueLabel(Metric.Hrv, Range.Day))
+        // Blood oxygen's day is its latest reading and when it was taken; its longer ranges stay averages.
+        assertEquals("%, daytime, latest at 14:05", DetailCopy.valueLabel(Metric.Spo2, Range.Day, latest = Latest("14:05")))
+        assertEquals("%, while asleep, latest at 05:10", DetailCopy.valueLabel(Metric.Spo2, Range.Day, latest = Latest("05:10", asleep = true)))
+        // Stress is never asleep or awake: its day says the level of its latest reading and when it was taken.
+        assertEquals("High, latest at 14:05", DetailCopy.valueLabel(Metric.Stress, Range.Day, latest = Latest("14:05", asleep = true, level = StressLevel.High)))
+        assertEquals("%, average of the last 30 days", DetailCopy.valueLabel(Metric.Spo2, Range.Month, latest = Latest("14:05")))
         assertEquals("Day average", DetailCopy.valueLabel(Metric.Stress, Range.Day))
+        // Stress has no unit: its longer ranges stay averages.
+        assertEquals("Normal, latest at 14:05", DetailCopy.valueLabel(Metric.Stress, Range.Day, latest = Latest("14:05", level = StressLevel.Normal)))
+        assertEquals("Average of the last 30 days", DetailCopy.valueLabel(Metric.Stress, Range.Month, latest = Latest("14:05", level = StressLevel.High)))
+        assertEquals("bpm resting", DetailCopy.valueLabel(Metric.RestingHr, Range.Day))
+        assertEquals("bpm resting, estimated", DetailCopy.valueLabel(Metric.RestingHr, Range.Day, estimated = true))
         assertEquals("steps a day, last 7 days", DetailCopy.valueLabel(Metric.Steps, Range.Week))
         assertEquals("ms, average of the last 30 days", DetailCopy.valueLabel(Metric.Hrv, Range.Month))
+    }
+
+    @Test fun `skin temperature's change on a card is just the signed change and its unit`() {
+        // Numbers as the test's locale writes them: the build also runs these under German.
+        fun n(ascii: String) = localNumber(ascii, Locale.getDefault())
+        assertEquals("+${n("0.3")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0.3f))
+        assertEquals("\u2212${n("0.2")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.2f))
+        // No change, or one that rounds to nothing, keeps a plus, never a lone minus.
+        assertEquals("+${n("0.0")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0f))
+        assertEquals("+${n("0.0")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.01f))
+    }
+
+    @Test fun `skin temperature's day says its change and which side of your normal it is on`() {
+        val skin = Metric.SkinTemperature
+        fun n(ascii: String) = localNumber(ascii, Locale.getDefault())
+        assertEquals("\u2212${n("0.7")} °C, below your normal", DetailCopy.skinChangeWord(skin, -0.7f, -1))
+        assertEquals("+${n("1.4")} °C, above your normal", DetailCopy.skinChangeWord(skin, 1.4f, 1))
+        assertEquals("+${n("0.1")} °C, within your normal", DetailCopy.skinChangeWord(skin, 0.1f, 0))
     }
 
     @Test fun `the strip ends today while the day shown is in the last week`() {
@@ -130,6 +162,10 @@ class DetailCopyTest {
     @Test fun `no detail sentence uses an interpunct, semicolon or em dash`() {
         val lines = listOfNotNull(
             DetailCopy.day(0, DaySource.Night, true, 30), DetailCopy.heartDay(1, 2, false), DetailCopy.year("1", "2", "ms"),
+            DetailCopy.valueLabel(Metric.RestingHr, Range.Day, estimated = true), DetailCopy.valueLabel(Metric.Spo2, Range.Day, latest = Latest("14:05")),
+            DetailCopy.valueLabel(Metric.Spo2, Range.Day, latest = Latest("05:10", asleep = true)),
+            DetailCopy.valueLabel(Metric.Stress, Range.Day, latest = Latest("14:05", level = StressLevel.High)),
+            DetailCopy.skinChangeWord(Metric.SkinTemperature, -0.7f, -1),
             DetailCopy.span(Range.Month, listOf(Level.Above, Level.Above), false, true, 30), DetailCopy.scoreWeek(listOf(1, 2)),
             DetailCopy.charge(1, 2, 1, true, false, 3), DetailCopy.learningNormal(1, true), DetailCopy.bandLabel(normal) { it.toString() },
         ) + Metric.entries.flatMap { m -> Range.entries.map { DetailCopy.valueLabel(m, it) } }

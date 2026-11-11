@@ -29,6 +29,7 @@ import org.openstrap.app.device.ConnectionState
 import org.openstrap.app.device.StrapController
 import org.openstrap.app.device.StrapInfo
 import org.openstrap.app.device.StrapManager
+import org.openstrap.app.device.SyncRecord
 import org.openstrap.app.device.SyncState
 import org.openstrap.app.export.AutoBackup
 import org.openstrap.app.health.HealthConnectAutoSync
@@ -78,6 +79,7 @@ class DeviceViewModel(
 
     val connection: StateFlow<ConnectionState> get() = strap.connection
     val sync: StateFlow<SyncState> get() = strap.sync
+    val syncRecord: StateFlow<SyncRecord> get() = strap.syncRecord
     val info: StateFlow<StrapInfo?> get() = strap.info
     val findingStrap: StateFlow<Boolean> get() = strap.findingStrap
 
@@ -159,6 +161,9 @@ class DeviceViewModel(
     val companionDeclined: StateFlow<Boolean> =
         settings.companionDeclined.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /** The prompt was backed out of: the offer is hidden until the app starts again, and the battery setting shows meanwhile. */
+    val companionOfferHidden: StateFlow<Boolean> get() = companion.offerHidden
+
     /** "Stay connected in background": whether Android can associate the strap, and whether it is, or battery optimization is off. */
     val companionSupported: Boolean get() = companion.supported
     val companionAssociated: StateFlow<Boolean> get() = companion.associated
@@ -168,7 +173,10 @@ class DeviceViewModel(
     fun associate(activity: Activity, address: String, launch: (IntentSender) -> Unit) =
         companion.associate(activity, address, launch, onError = ::showMessage)
 
-    /** The association prompt's answer. Turned down, the page says what else keeps the strap connected. */
+    /**
+     * The association prompt's answer. Backed out of, the offer hides for now and the page says what else keeps the strap
+     * connected; a failure of the system's own is kept ([CompanionLink.onResult]).
+     */
     fun associationResult(resultCode: Int) {
         if (!companion.onResult(resultCode)) showMessage(strings.get(R.string.you_strap_not_linked))
     }

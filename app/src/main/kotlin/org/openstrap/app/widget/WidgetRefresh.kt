@@ -2,6 +2,7 @@ package org.openstrap.app.widget
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import org.openstrap.app.BuildConfig
 import org.openstrap.app.data.WidgetKind
 import org.openstrap.app.ui.glow.draw.GlowMood
@@ -17,7 +18,7 @@ object WidgetRefresh {
     fun version(kind: WidgetKind): StateFlow<Int> = versions.getValue(kind)
 
     fun bump(kind: WidgetKind) {
-        versions.getValue(kind).value++
+        versions.getValue(kind).update { it + 1 }
     }
 
     private val resizes = WidgetKind.entries.associateWith { MutableStateFlow(0) }
@@ -26,7 +27,7 @@ object WidgetRefresh {
     fun resized(kind: WidgetKind): StateFlow<Int> = resizes.getValue(kind)
 
     fun resize(kind: WidgetKind) {
-        resizes.getValue(kind).value++
+        resizes.getValue(kind).update { it + 1 }
     }
 
     /**
@@ -52,7 +53,7 @@ object WidgetRefresh {
 
     /**
      * Debug builds: the strap status line every widget shows instead of the real one, for the gallery: "notpaired",
-     * "low", "stale" (4 hours ago), "yesterday", "week" (3 days ago), "syncing", or "none" for no line; null reads
+     * "low", "stale" (4 hours ago), "yesterday", "week" (3 days ago), "syncing", "failed", "bluetooth", or "none" for no line; null reads
      * the strap.
      */
     @Volatile
@@ -69,6 +70,8 @@ object WidgetRefresh {
         "yesterday" -> StrapStatus.StaleSync(now - 86_400)
         "week" -> StrapStatus.StaleSync(now - 3 * 86_400)
         "syncing" -> StrapStatus.Syncing
+        "failed" -> StrapStatus.SyncFailed
+        "bluetooth" -> StrapStatus.BluetoothOff
         else -> null
     }
 

@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -50,6 +52,7 @@ import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.data.SleepEdits
 import org.openstrap.app.data.SleepHistory
+import org.openstrap.app.data.HeartReadings
 import org.openstrap.app.data.Summaries
 import org.openstrap.app.data.db.SleepSession
 import org.openstrap.app.data.wasoMinutes
@@ -136,10 +139,18 @@ internal fun SleepScoreDetail(
     val session = state.sleep
     val score = session?.score
     val color = MetricColors.sleepDeep
-    var adjusting by remember(state.date) { mutableStateOf(false) }
-    var deleting by remember(state.date) { mutableStateOf(false) }
-    // The strap's session just deleted, while its Undo shows.
-    var undo by remember { mutableStateOf<SleepSession?>(null) }
+    // Saveable, so turning the phone doesn't close the sheet being used.
+    var adjusting by rememberSaveable(state.date) { mutableStateOf(false) }
+    var deleting by rememberSaveable(state.date) { mutableStateOf(false) }
+    // The strap's session just asked to be deleted, and once the day shows it gone, the same session while its Undo
+    // shows. Both are for this day only, so Undo never names another day, and Undo is never offered for a delete that
+    // didn't happen.
+    var pendingDelete by remember(state.date) { mutableStateOf<SleepSession?>(null) }
+    var undo by remember(state.date) { mutableStateOf<SleepSession?>(null) }
+    SideEffect {
+        val gone = pendingDelete ?: return@SideEffect
+        if (session == null) { undo = gone; pendingDelete = null }
+    }
     // TODO(step 6): Month and Year wait for a stored history of the strap's sleep scores; the day loads only 14 nights.
     val ranges = listOf(Range.Day, Range.Week)
     var rangeIndex by rememberSaveable { mutableIntStateOf(0) }
@@ -160,9 +171,13 @@ internal fun SleepScoreDetail(
             DetailHeadline(Math.round(known.average()).toString(), stringResource(R.string.glow_sleep_week_average), null)
         range == Range.Week ->
             DetailHeadline.none(stringResource(R.string.glow_sleep_no_scores), stringResource(R.string.glow_sleep_in_last_7_nights))
-        score != null -> DetailHeadline(score.toString(), SleepCopy.scoreLabel(isToday), TabCopy.sleepScoreWord(score))
+        score != null -> DetailHeadline(
+            score.toString(), SleepCopy.scoreLabel(isToday, state.sleepScoreAdjusted), TabCopy.sleepScoreWord(score),
+        )
         session == null && state.deletedSleep != null ->
             DetailHeadline.none(stringResource(R.string.glow_sleep_no_score), SleepCopy.noScoreDeleted(isToday))
+        // The day's rows haven't arrived: nothing yet, not "No score".
+        !state.loaded -> DetailHeadline.none("", "")
         else -> SleepCopy.noScore(session != null, isToday).let { (word, why) -> DetailHeadline.none(word, why) }
     }
 
@@ -184,7 +199,8 @@ internal fun SleepScoreDetail(
                 if (session == null && deleted != null) {
                     item { DeletedNight(SleepCopy.deletedNight(clock(deleted.start), clock(deleted.end), isToday)) { editing.restore(deleted.strap) } }
                 } else if (session == null) {
-                    item { DetailEmpty(TabCopy.noNight(state.naps.isNotEmpty(), isToday)) }
+                    // Not before the day has loaded: an empty state isn't "No night".
+                    if (state.loaded) item { DetailEmpty(TabCopy.noNight(state.naps.isNotEmpty(), isToday)) }
                 } else {
                     val asleep = state.asleepSeconds ?: (session.end - session.start)
                     val detected = state.sleepAsDetected
@@ -276,7 +292,7 @@ internal fun SleepScoreDetail(
     )
     if (deleting && session != null && detected != null) DeleteSleepSheet(
         SleepCopy.deleteTitle(false, isToday), Ranges.of(clock(session.start), clock(session.end)),
-        onDelete = { deleting = false; editing.delete(detected); undo = detected }, onDismiss = { deleting = false },
+        onDelete = { deleting = false; editing.delete(detected); pendingDelete = detected }, onDismiss = { deleting = false },
     )
 }
 
@@ -438,7 +454,12 @@ private fun NightLines(state: DayUiState, window: LongRange, onScrub: (DetailHea
         if (hr.isNotEmpty()) {
             ChartTitle(
                 stringResource(R.string.glow_sleep_heart_rate),
-                stringResource(R.string.glow_sleep_heart_note, hr.minOf { it.y }.toInt(), hr.map { it.y }.average().toInt()),
+                // The lowest stored reading and the night's average, as the Sleep tab says them; not the line's 5-minute averages.
+                stringResource(
+                    R.string.glow_sleep_heart_note,
+                    SleepCopy.lowestHeart(state)?.y?.let(Math::round) ?: Math.round(hr.minOf { it.y }),
+                    SleepCopy.averageHeart(state) ?: Math.round(hr.map { it.y }.average()).toInt(),
+                ),
                 scrubbed = hrAt,
             )
             ScrubLine(hr, window, 130.dp, labels, MetricColors.heart, stringResource(R.string.glow_unit_bpm)) { hrAt = it; onScrub(it) }
@@ -553,10 +574,16 @@ internal fun NapsDetail(
 ) {
     val naps = state.naps.sortedBy { it.start }
     // The nap whose times are being adjusted, or that's being deleted, by its start as shown.
-    var adjusting by remember(state.date) { mutableStateOf<Long?>(null) }
-    var deleting by remember(state.date) { mutableStateOf<Long?>(null) }
-    // The strap's nap just deleted and its start as shown, while its Undo shows.
-    var undo by remember { mutableStateOf<Pair<SleepSession, Long>?>(null) }
+    var adjusting by rememberSaveable(state.date) { mutableStateOf<Long?>(null) }
+    var deleting by rememberSaveable(state.date) { mutableStateOf<Long?>(null) }
+    // As in the Sleep score: the nap asked to be deleted with its start as shown, then, once the day no longer has it,
+    // the same while its Undo shows. For this day only.
+    var pendingDelete by remember(state.date) { mutableStateOf<Pair<SleepSession, Long>?>(null) }
+    var undo by remember(state.date) { mutableStateOf<Pair<SleepSession, Long>?>(null) }
+    SideEffect {
+        val gone = pendingDelete ?: return@SideEffect
+        if (state.napsAsDetected[gone.second] == null) { undo = gone; pendingDelete = null }
+    }
     val total = naps.sumOf { it.end - it.start }
     val color = MetricColors.sleepDeep
     val today = LocalDate.now()
@@ -630,6 +657,9 @@ internal fun NapsDetail(
                             // The strap sends no average for a nap, so its heart rate is the day's readings in its window.
                             val window = nap.start..nap.end
                             val hr = remember(state.heartRate, window) { state.heartRate.filter { it.x in window } }
+                            val minutes = remember(state.heartMinutes, window) {
+                                HeartReadings.within(state.heartMinutes, window.first, window.last)
+                            }
                             if (hr.isNotEmpty()) {
                                 Box(Modifier.padding(top = 16.dp)) {
                                     ScrubLine(
@@ -637,7 +667,12 @@ internal fun NapsDetail(
                                         stringResource(R.string.glow_unit_bpm),
                                     ) { scrub = it }
                                 }
-                                Caption(SleepCopy.napHeart(hr.minOf { it.y }.toInt(), hr.map { it.y }.average().toInt()), Modifier.padding(top = 6.dp, bottom = 8.dp))
+                                // The nap's lowest and average from the stored readings, not the line's averages.
+                                val low = HeartReadings.lowest(minutes)?.second
+                                val average = HeartReadings.mean(minutes)
+                                if (low != null && average != null) {
+                                    Caption(SleepCopy.napHeart(low, average), Modifier.padding(top = 6.dp, bottom = 8.dp))
+                                }
                             }
                         }
                     }
@@ -665,7 +700,8 @@ internal fun NapsDetail(
         if (nap == null || detected == null) androidx.compose.runtime.SideEffect { deleting = null }
         else DeleteSleepSheet(
             SleepCopy.deleteTitle(true, isToday), Ranges.of(clock(nap.start), clock(nap.end)),
-            onDelete = { deleting = null; editing.delete(detected); undo = detected to nap.start }, onDismiss = { deleting = null },
+            onDelete = { deleting = null; editing.delete(detected); pendingDelete = detected to nap.start },
+            onDismiss = { deleting = null },
         )
     }
 }

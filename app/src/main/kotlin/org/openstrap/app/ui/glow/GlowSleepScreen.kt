@@ -102,7 +102,7 @@ fun GlowSleepScreen(
     onRestore: (org.openstrap.app.data.db.SleepSession) -> Unit = {},
 ) {
     val list = rememberLazyListState()
-    val rec = recovery?.takeIf { it.date == state.date }
+    val rec = recovery
     val breathing = rec?.breathingDisturbances
     // Before the strap has seen a night, cards keep their shape and wait (spec 4.3): breathing disturbances too.
     val firstNights = rec != null && !rec.charge.anchored && state.sleep == null
@@ -181,7 +181,9 @@ private fun NightHero(state: DayUiState, firstNights: Boolean, onRestore: (org.o
             HeroNumber(
                 score?.toString(),
                 listOfNotNull(
-                    TabCopy.sleepScoreLine(score),
+                    TabCopy.sleepScoreLine(score).let {
+                        if (state.sleepScoreAdjusted) stringResource(R.string.glow_sleep_score_adjusted, it) else it
+                    },
                     TabCopy.woke(session.wakeCount),
                 ),
             )
@@ -260,9 +262,12 @@ internal val SleepRowColors: List<Color> = DayViewModel.SLEEP_STAGE_ROWS.let { r
 private fun VitalsList(state: DayUiState, firstNights: Boolean, onOpen: (Metric) -> Unit) {
     ListPanel(title = stringResource(R.string.glow_sleep_vitals_title), note = stringResource(R.string.glow_sleep_vitals_note)) {
         nightVitals(state, firstNights).forEachIndexed { i, v ->
+            val tag = org.openstrap.app.ui.dashboard.bodyTag(v.metric, v.direction)
             ListRow(
-                v.label, v.color, v.value, v.status,
-                tag = org.openstrap.app.ui.dashboard.bodyTag(v.metric, v.direction), onClick = { onOpen(v.metric) }, divider = i > 0,
+                v.label, v.color, v.value,
+                // The tag already says which way it is off, so the plain word against your normal gives way to it.
+                v.status.takeUnless { tag != null && it == org.openstrap.app.presentation.TodayCopy.normalWord(v.direction) },
+                tag = tag, onClick = { onOpen(v.metric) }, divider = i > 0,
                 icon = v.metric.rowIcon(),
             )
         }

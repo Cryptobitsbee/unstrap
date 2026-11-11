@@ -50,7 +50,12 @@ internal class StrapCommands(
     }
 
     /** The alarm module's version for the connection it was read on: Zepp's `sq0.l`, asked again after a reconnect. */
-    private var alarmCaps: Pair<ChannelSession, AlarmCapabilities>? = null
+    @Volatile private var alarmCaps: Pair<ChannelSession, AlarmCapabilities>? = null
+
+    /** The link ended or the strap was forgotten: the next alarm command asks the strap's limits again. */
+    fun forgetAlarmCaps() {
+        alarmCaps = null
+    }
 
     private suspend fun alarmCaps(): AlarmCapabilities {
         val s = link.activeSession

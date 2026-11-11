@@ -44,6 +44,7 @@ import org.openstrap.app.data.db.SavedWorkout
 import org.openstrap.app.device.ConnectionState
 import org.openstrap.app.device.WorkoutSession
 import org.openstrap.app.device.WorkoutState
+import org.openstrap.app.device.inProgress
 import org.openstrap.app.device.locationAvailable
 import org.openstrap.app.presentation.SummaryRewards
 import org.openstrap.app.ui.dashboard.DayUiState
@@ -228,7 +229,7 @@ internal fun BoxScope.WorkoutLayer(
         else -> Unit
     }
     // The ready screen comes and goes like any other screen, and a workout starting replaces it at once.
-    val recording = state is WorkoutState.Recording || state is WorkoutState.Ended
+    val recording = state.inProgress
     // Read once for both screens, and handed down to be read only there.
     val saved by remember { container.workout.savedWorkouts() }.collectAsStateWithLifecycle(emptyList())
     // Choose sits under Ready, so closing Ready comes back to it.

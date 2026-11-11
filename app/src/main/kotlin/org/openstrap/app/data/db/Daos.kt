@@ -388,6 +388,27 @@ interface HealthDao : RangedReads {
         deleteAppWorkoutRow(start)
     }
 
+    /**
+     * Discards the phone workout [start] whole: the workout, the strap's own records of it
+     * ([org.openstrap.app.data.Workouts.strapTwins]) and its time as "Not a workout", in one transaction. Its time range
+     * is read before anything is deleted, and a failure undoes all of it, so a retry finds the workout still there and
+     * does the twin cleanup too. [now] is when it happens. Returns the workout as it was, null if it was gone already.
+     */
+    @androidx.room.Transaction
+    suspend fun discardAppWorkout(start: Long, now: Long): AppWorkout? {
+        val w = appWorkoutOnce(start)
+        val range = w?.takeIf { it.end != null }?.let { org.openstrap.app.data.Workouts.phoneRange(it, now) }
+        val twins = range?.let { org.openstrap.app.data.Workouts.strapTwins(workoutsOnce(it.first, it.last), it) }.orEmpty()
+        // Gone before its twins: a start trimmed into a twin would make it another owner of the strap's effect, and the
+        // effect would stay, its recovery carried into the next workout.
+        deleteAppWorkout(start)
+        twins.forEach { deleteStrapWorkout(it.start, now) }
+        // The strap's copy usually syncs after the summary shows: its time is remembered, and the sync leaves out a
+        // strap workout over it.
+        range?.let { insertDismissedWorkouts(listOf(DismissedWorkout(it.first, it.last))) }
+        return w
+    }
+
     @Query("SELECT * FROM sport_effect WHERE `end` BETWEEN :from AND :to ORDER BY `end`")
     suspend fun sportEffectsOnce(from: Long, to: Long): List<SportEffectRow>
 
@@ -694,6 +715,19 @@ interface HealthDao : RangedReads {
 
     @Query("SELECT date(timestamp, 'unixepoch', 'localtime') AS day, AVG(milliseconds) AS value, MIN(milliseconds) AS min, MAX(milliseconds) AS max, COUNT(*) AS count FROM hrv WHERE timestamp BETWEEN :from AND :to GROUP BY day ORDER BY day")
     fun dailyHrv(from: Long, to: Long): Flow<List<DailyAggregate>>
+
+    /**
+     * HRV while asleep, per night: the readings inside each main sleep from 5 to 200 ms ([Recovery.HRV_MIN_MS] to
+     * [Recovery.HRV_MAX_MS]), on the day the sleep ended, the mean rounded to a whole ms as the night's figure is
+     * ([NightMetrics.sleepHrv]).
+     */
+    @Query(
+        "SELECT date(s.`end`, 'unixepoch', 'localtime') AS day, ROUND(AVG(h.milliseconds)) AS value, " +
+            "MIN(h.milliseconds) AS min, MAX(h.milliseconds) AS max, COUNT(*) AS count " +
+            "FROM hrv h JOIN sleep_session s ON s.nap = 0 AND h.timestamp BETWEEN s.start AND s.`end` " +
+            "WHERE h.timestamp BETWEEN :from AND :to AND h.milliseconds BETWEEN 5 AND 200 GROUP BY day ORDER BY day",
+    )
+    fun dailySleepHrv(from: Long, to: Long): Flow<List<DailyAggregate>>
 
     @Query("SELECT date(timestamp, 'unixepoch', 'localtime') AS day, AVG(milliseconds) AS value, MIN(milliseconds) AS min, MAX(milliseconds) AS max, COUNT(*) AS count FROM hrv_sdnn WHERE timestamp BETWEEN :from AND :to GROUP BY day ORDER BY day")
     fun dailyHrvSdnn(from: Long, to: Long): Flow<List<DailyAggregate>>

@@ -169,7 +169,7 @@ fun GlowActivityScreen(
     }
     val stored = activity.heartPointsOn(state.date)
     val heartPoints = state.pai?.total ?: stored[state.date]?.total
-    val r = recovery?.takeIf { it.date == state.date }
+    val r = recovery
     val live = liveHeartRate?.takeIf { isToday }
     org.openstrap.app.ui.components.HoldLiveHeartRate(isToday)
     val slots = activityCards(ActivityFacts(isToday = isToday, suggestion = suggestion != null, live = live != null))
@@ -215,7 +215,7 @@ fun GlowActivityScreen(
                     }
                     ActivityCard.Load -> DayLoadCard(r) { open(Score.Load) }
                     ActivityCard.HeartRate -> HeartRateCard(
-                        state, live, restingRange, rememberNormal(Metric.HeartRate, state.date, history),
+                        state, live, restingRange,
                     ) { onOpenMetric(Metric.HeartRate) }
                     ActivityCard.Facts -> DayFactsList(state, r, workouts, isToday, onEditProfile, open, partial)
                     ActivityCard.Workouts -> WorkoutsList(
@@ -393,12 +393,11 @@ private val LevelFillHeight = 28.dp
 
 /**
  * Heart rate (spec 5.3, 6): the day's line through your [resting] range as a dim band ([DayLine]), the number under it
- * following the finger while you hold the line. When the latest reading is off your heart rate [normal] the rim lights
- * at the line's end, over the top when above and the foot when below, with "Above normal" or "Below normal" after the
- * number (spec 2.5). Opens the heart rate detail.
+ * following the finger while you hold the line. A reading moves all day, so there is no tag and no rim (resting heart
+ * rate carries its own). Opens the heart rate detail.
  */
 @Composable
-private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal?, normal: History.Normal?, onClick: () -> Unit) {
+private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal?, onClick: () -> Unit) {
     val step = HEART_STEP_SECONDS
     val values = remember(state.heartRate, state.dayStart) { bucket(state.heartRate, state.dayStart..state.dayEnd, step) }
     var picked by remember(values) { mutableStateOf<Int?>(null) }
@@ -406,12 +405,9 @@ private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal
     val pad = with(LocalDensity.current) { LinePad.toPx() }
     val scrubbed = picked?.let { i -> values.getOrNull(i)?.let { it.roundToInt() to state.dayStart + i * step } }
     val now = scrubbed?.first ?: live ?: state.latestHeartRate
-    val status = bodyOffStatus(state.latestHeartRate?.toFloat(), normal)
-    val tag = offTag(OffWords.Normal, status)
-    val rim = if (tag != null) dayLineRim(values, status == OffStatus.Above, PictureSize.Wide) else null
-    PictureCard(MetricColors.heart, Modifier.fillMaxWidth().gridSize(CardSize.Wide), rim = rim, onClick = onClick) {
+    PictureCard(MetricColors.heart, Modifier.fillMaxWidth().gridSize(CardSize.Wide), onClick = onClick) {
         EdgeTitle(
-            stringResource(R.string.glow_today_heart_rate), state.restingHeartRate?.let { stringResource(R.string.glow_today_resting, it) },
+            stringResource(R.string.glow_today_heart_rate), restingNote(state),
         )
         if (state.heartRate.size >= 2) {
             Spacer(Modifier.height(GlowLayout.TitleGap))
@@ -424,17 +420,21 @@ private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal
                     .scrub(values) { x -> picked = x?.let { nearestReading(values, it, width.toFloat(), pad) } },
             )
         }
-        // The tag is about now, so a scrubbed point leaves it out.
         TaggedNumber(
-            now?.toString(), stringResource(R.string.glow_unit_bpm), tag.takeIf { scrubbed == null }, Modifier.padding(top = 14.dp),
+            now?.toString(), stringResource(R.string.glow_unit_bpm), null, Modifier.padding(top = 14.dp),
         )
         val at = scrubbed?.second ?: state.heartRate.lastOrNull()?.x
-        StatusLine(TodayCopy.heartAt(live != null && scrubbed == null, at?.let(::clock)))
+        // A held point is the average of a 10-minute stretch, not one reading.
+        StatusLine(
+            if (scrubbed != null) stringResource(R.string.core_today_heart_average_from, step / SECONDS_PER_MINUTE, clock(scrubbed.second))
+            else TodayCopy.heartAt(live != null, at?.let(::clock)),
+        )
     }
 }
 
 /** The heart rate line's buckets: 10 minutes each. */
 private const val HEART_STEP_SECONDS = 10 * 60L
+private const val SECONDS_PER_MINUTE = 60L
 
 /** The line's height on the card and the inset [DayLine] draws inside its edges. */
 private val DayLineHeight = 70.dp

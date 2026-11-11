@@ -35,7 +35,7 @@ internal class BuzzCoordinator(
     @Volatile private var callHold = false
     /** When the last motor pattern ends: one still playing then cuts off a `03` sent meanwhile (seen 2026-10-20). */
     @Volatile private var motorBusyUntil = 0L
-    private var pulseJob: Job? = null
+    @Volatile private var pulseJob: Job? = null
 
     // Each return is a buzz given way to a call.
     @Suppress("ReturnCount")
@@ -154,9 +154,23 @@ internal class BuzzCoordinator(
 
     /** The same `03` … `06` as a ringing call, with Zepp's 60 s limit (03 §3.16). */
     suspend fun findStrap() {
-        startBuzzing()
-        log("find strap: buzzing")
+        // Set before the start goes out, so a stop that lands meanwhile (endFind) is seen below and wins.
         findingStrap.value = true
+        var started = false
+        try {
+            startBuzzing()
+            started = true
+        } finally {
+            // Rolled back, whatever ended the start (a refusal, no link, a cancelled caller).
+            if (!started) findingStrap.value = false
+        }
+        if (!findingStrap.value) {
+            // The stop got in first, so its 06 may have gone out before this 03: send another.
+            log("find strap: stopped while starting")
+            catching { stopBuzzing() }
+            return
+        }
+        log("find strap: buzzing")
         findJob?.cancel()
         findJob = scope.launch {
             delay(FindDevice.FIND_TIMEOUT_MS)
@@ -165,6 +179,14 @@ internal class BuzzCoordinator(
             findJob = null
             catching { stopBuzzing() }
         }
+    }
+
+    /** The link ended: nothing is buzzing, so Find strap, a steady buzz and the pulses stop with it. */
+    fun linkEnded() {
+        findBuzzOn = false
+        pulseJob?.cancel()
+        pulseJob = null
+        endFind()
     }
 
     fun endFind() {

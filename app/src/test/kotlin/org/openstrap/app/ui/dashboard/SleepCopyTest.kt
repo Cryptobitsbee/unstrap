@@ -41,6 +41,11 @@ class SleepCopyTest {
             hrv = listOf(ChartPoint(midnight + 14 * 3600, 90f)),
             sleepHrv = listOf(ChartPoint(midnight + 3600, 40f), ChartPoint(midnight - 7200, 41f)),
             sleepHeartRate = listOf(ChartPoint(midnight - 1800, 60f), ChartPoint(midnight + 3 * 3600, 48f), ChartPoint(midnight + 9 * 3600, 70f)),
+            // The stored readings behind the line's 5-minute averages: one minute dips below the 48 average.
+            sleepHeartMinutes = listOf(
+                midnight - 1800 to 60, midnight + 3 * 3600 to 52, midnight + 3 * 3600 + 60 to 46, midnight + 3 * 3600 + 120 to 48,
+                midnight + 9 * 3600 to 70,
+            ),
         )
     }
 
@@ -50,12 +55,32 @@ class SleepCopyTest {
         assertEquals(94f, SleepCopy.nightValue(s, Metric.Spo2))
         // Heart rate's night value is the strap's average for the night; the lowest is only from readings while asleep.
         assertEquals(55f, SleepCopy.nightValue(s, Metric.HeartRate))
-        assertEquals(48f, SleepCopy.lowestHeart(s)!!.y)
+        // The lowest is the lowest stored reading and when it was, not the lowest 5-minute average (48).
+        assertEquals(46f, SleepCopy.lowestHeart(s)!!.y)
+        assertEquals(midnight + 3 * 3600 + 60, SleepCopy.lowestHeart(s)!!.x)
         // Readings outside the sleep (the 70 after waking) stay out of the night's line.
         assertEquals(listOf(60f, 48f), SleepCopy.nightSeries(s, Metric.HeartRate).map { it.y })
         assertEquals(listOf(40f), SleepCopy.nightSeries(s, Metric.Hrv).map { it.y })
         // No sleep, no night value, even with readings in the day.
         assertNull(SleepCopy.nightValue(state(sleep = null), Metric.Hrv))
+    }
+
+    @Test fun `the average while asleep is the strap's, else the mean of the stored readings`() {
+        assertEquals(55, SleepCopy.averageHeart(state()))
+        // 60, 52, 46 and 48 inside the sleep (the 70 after waking is out): 51.5, rounded up rather than cut to 51.
+        assertEquals(52, SleepCopy.averageHeart(state(sleep = session.copy(averageHeartRate = null))))
+        // Without the 60: 52, 46 and 48 average 48.67, which is 49.
+        assertEquals(49, SleepCopy.averageHeart(state(sleep = session.copy(averageHeartRate = null)).let { it.copy(sleepHeartMinutes = it.sleepHeartMinutes.drop(1)) }))
+    }
+
+    @Test fun `a score the user's times moved says it is adjusted`() {
+        val moved = session.copy(start = session.start + 1800)
+        assertFalse(state().sleepScoreAdjusted)
+        assertFalse(state().copy(sleepAsDetected = session).sleepScoreAdjusted)
+        assertTrue(state(sleep = moved).copy(sleepAsDetected = session).sleepScoreAdjusted)
+        assertEquals("last night, adjusted", SleepCopy.scoreLabel(true, adjusted = true))
+        assertEquals("that night, adjusted", SleepCopy.scoreLabel(false, adjusted = true))
+        assertEquals("last night", SleepCopy.scoreLabel(true))
     }
 
     @Test fun `a night vital reads against the nights before, as the Sleep tab's row does`() {
@@ -73,6 +98,27 @@ class SleepCopyTest {
         assertNull(SleepCopy.nightNormal(s, Metric.HeartRate))
     }
 
+    @Test fun `skin temperature's row is the night's level, its change from your normal under it once there is one`() {
+        fun row(nights: Int): NightVital {
+            // Nights at 35.9 and 36.1 by turns (a normal of 36.0), then tonight at 36.5.
+            val before = (nights.toLong() downTo 1L).map { back ->
+                SleepNight(date.minusDays(back), session, skinTemperature = if (back % 2 == 0L) 35.9f else 36.1f)
+            }
+            return nightVitals(DayUiState(date = date, sleep = session, nights = before + SleepNight(date, session, skinTemperature = 36.5f)))
+                .first { it.metric == Metric.SkinTemperature }
+        }
+        val formed = row(8)
+        fun n(ascii: String) = org.openstrap.app.presentation.localNumber(ascii, java.util.Locale.getDefault())
+        assertEquals(n("36.5"), formed.value)
+        assertEquals("+${n("0.5")} \u00B0C", formed.status)
+        assertEquals(1, formed.direction)
+        // While the normal forms, the level and how far along it is.
+        val forming = row(3)
+        assertEquals(n("36.5"), forming.value)
+        assertTrue(forming.status, forming.status.startsWith("Learning"))
+        assertNull(forming.direction)
+    }
+
     @Test fun `the night's week ends on the night shown, with the same value as its Day`() {
         val week = SleepCopy.nightWeek(state(), Metric.Hrv)
         assertEquals(7, week.size)
@@ -86,17 +132,42 @@ class SleepCopyTest {
         assertEquals("Lowest 48 bpm at 03:00 last night, 55 on average while asleep.", SleepCopy.nightHeart(48, "03:00", 55, today = true))
         assertEquals("55 bpm on average while asleep that night.", SleepCopy.nightHeart(null, null, 55, today = false))
         assertEquals("ms, average asleep", SleepCopy.nightLabel(Metric.Hrv, Range.Day))
+        // Skin temperature's label no longer carries its change from your normal (DetailCopy.skinChangeWord says it).
+        assertEquals("°C, average asleep", SleepCopy.nightLabel(Metric.SkinTemperature, Range.Day))
         assertEquals("ms, average of the last 7 nights", SleepCopy.nightLabel(Metric.Hrv, Range.Week))
         // Month and Year say when their days aren't only nights.
-        assertTrue("day and night" in SleepCopy.nightLabel(Metric.Hrv, Range.Month))
+        assertEquals("ms, last 30 nights", SleepCopy.nightLabel(Metric.Hrv, Range.Month))
+        assertTrue("day and night" in SleepCopy.nightLabel(Metric.SkinTemperature, Range.Month))
         assertEquals("%, last 30 nights", SleepCopy.nightLabel(Metric.Spo2, Range.Month))
         assertEquals("No sleep" to "None recorded last night", SleepCopy.nightNoValue(hasSleep = false, today = true))
         assertEquals("No reading" to "Not measured that night", SleepCopy.nightNoValue(hasSleep = true, today = false))
     }
 
+    @Test fun `blood oxygen is the night's on the Sleep and Recovery tabs only, the day's latest reading elsewhere`() {
+        assertFalse(Metric.Spo2 in SleepCopy.NIGHT_SIGNALS)
+        assertTrue(Metric.Spo2 in SleepCopy.NIGHT_FIGURES)
+        // The other night signals are forced to the night wherever they open.
+        assertTrue(SleepCopy.NIGHT_SIGNALS.containsAll(listOf(Metric.Hrv, Metric.Breathing, Metric.SkinTemperature)))
+        assertTrue(SleepCopy.NIGHT_FIGURES.containsAll(SleepCopy.NIGHT_SIGNALS))
+        assertFalse(Metric.RestingHr in SleepCopy.NIGHT_FIGURES)
+        // The night's average stays what the Sleep tab reads, whatever the day's readings are.
+        val s = state().copy(spo2 = listOf(ChartPoint(midnight + 14 * 3600, 91f)))
+        assertEquals(94f, SleepCopy.nightValue(s, Metric.Spo2))
+        assertEquals(91f, LatestReading.spo2(s)?.y)
+    }
+
+    @Test fun `blood oxygen's row on the Sleep tab says it is the night average, tag or not`() {
+        val row = nightVitals(state()).first { it.metric == Metric.Spo2 }
+        assertEquals("94%", row.value)
+        assertEquals("Night average", row.status)
+    }
+
     @Test fun `night blood oxygen draws on its own table`() {
         assertEquals(DailyMetric.SleepSpo2, SleepCopy.nightDaily(Metric.Spo2))
-        assertEquals(DailyMetric.Hrv, SleepCopy.nightDaily(Metric.Hrv))
+        // HRV is the night's figure on every range, so its Month and Year come from the sleeps too.
+        assertEquals(DailyMetric.SleepHrv, SleepCopy.nightDaily(Metric.Hrv))
+        assertEquals(DailyMetric.SleepHrv, Metric.Hrv.daily)
+        assertTrue(SleepCopy.dailyIsNightly(Metric.Hrv))
         assertTrue(SleepCopy.dailyIsNightly(Metric.Breathing))
         assertFalse(SleepCopy.dailyIsNightly(Metric.SkinTemperature))
     }
@@ -142,7 +213,7 @@ class SleepCopyTest {
         val lines = listOf(
             SleepCopy.nightHeart(48, "03:00", 55, true), SleepCopy.nightHeart(null, null, 55, false),
             SleepCopy.heartWeek(listOf(52, null, 55)), SleepCopy.heartWeek(listOf(52)),
-            SleepCopy.scoreLabel(true), SleepCopy.scoreLabel(false),
+            SleepCopy.scoreLabel(true), SleepCopy.scoreLabel(false), SleepCopy.scoreLabel(true, adjusted = true),
             SleepCopy.night("Short night", 5 * 3600L, listOf(7 * 3600L, 8 * 3600L, 6 * 3600L)),
             SleepCopy.regularityNight(23 * 60, 7 * 60, 23 * 60, true), SleepCopy.noNight(true), SleepCopy.noNight(false),
             SleepCopy.napsLabel(true), SleepCopy.naps(3, 3600), SleepCopy.napHeart(58, 64), SleepCopy.NAP_NO_STAGES,

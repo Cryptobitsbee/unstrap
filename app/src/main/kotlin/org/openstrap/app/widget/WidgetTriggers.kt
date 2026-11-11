@@ -51,6 +51,8 @@ internal class WidgetTriggers(
     val profile: Flow<Any>,
     /** The phone's clock, date or time zone was changed ([org.openstrap.app.data.Today.changes]). */
     val clockChanges: Flow<Unit> = emptyFlow(),
+    /** Whether Bluetooth is off on the phone: the status line says so. */
+    val bluetoothOff: Flow<Boolean> = emptyFlow(),
     val now: () -> Long,
 )
 
@@ -74,21 +76,30 @@ internal fun CoroutineScope.watchWidgetTriggers(t: WidgetTriggers, changed: (Set
         var previous: SyncState = SyncState.Idle
         t.sync.collect { s ->
             if (s is SyncState.Running && previous !is SyncState.Running) launch {
-                val done = catching { t.strapSnapshot.first().lastSyncDone }.getOrNull()
-                if (syncStale(done, t.now())) changed(all)
+                val kept = catching { t.strapSnapshot.first() }.getOrNull()
+                // Stale or failing: their line turns to Syncing.
+                if (syncStale(kept?.lastSyncDone, t.now()) || kept?.failingSince != null) changed(all)
             }
             previous = s
         }
     }
-    // When the status line could change: pairing, the low battery edge, charging.
+    // When the status line could change: pairing, the low battery edge, charging, a sync failing or working again.
     launch {
         var before: StrapSnapshot? = null
         t.strapSnapshot.collect { now ->
             val was = before
             before = now
-            if (was != null && strapStateChanged(now.paired, now.battery, now.charging, was.paired, was.battery, was.charging)) changed(all)
+            if (was != null && strapStateChanged(
+                    now.paired, now.battery, now.charging, was.paired, was.battery, was.charging,
+                    failing = now.failingSince != null, wasFailing = was.failingSince != null,
+                )
+            ) {
+                changed(all)
+            }
         }
     }
+    // Bluetooth going off or on moves the line, whatever the strap's own state says.
+    launch { t.bluetoothOff.distinctUntilChanged().drop(1).collect { changed(all) } }
     launch { t.todaySteps.filterNotNull().collect { stepsChanged() } }
     // Everything a widget shows may have moved.
     launch { t.syncEnded.collect { changed(all) } }

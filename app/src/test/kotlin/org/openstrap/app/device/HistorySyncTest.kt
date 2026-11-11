@@ -299,6 +299,17 @@ class HistorySyncTest {
         assertEquals(1, table("SELECT * FROM pai").size)
     }
 
+    @Test fun `a type cut off after its first chunk keeps that chunk and fails the sync, as Zepp`() = runTest {
+        seedStrap()
+        // The first HRV START is served, every later one refused.
+        strap.refuse = { type -> if (type == HistoryDataType.HRV_RMSSD.code && strap.starts.count { it.first == type } > 1) 5 else null }
+        runSync()
+        // The first chunk (two records, one a zero) is stored, and the cursor moved past it.
+        assertEquals(listOf(listOf(base, 41L)), table("SELECT timestamp, milliseconds FROM hrv ORDER BY timestamp"))
+        assertEquals(base + 301, cursors.values[key(HistoryDataType.HRV_RMSSD)])
+        assertEquals(SyncState.Failed("Sync failed"), state.value)
+    }
+
     @Test fun `fast-charge mode is acknowledged and starts nothing more`() = runTest {
         seedStrap()
         strap.fastRecharge = true

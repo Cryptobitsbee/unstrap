@@ -1,5 +1,7 @@
 package org.openstrap.app.health
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
@@ -25,9 +27,11 @@ import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.OxygenSaturationRecord
 import androidx.health.connect.client.records.Record
+import androidx.health.connect.client.records.RespiratoryRateRecord
 import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
+import androidx.health.connect.client.records.Vo2MaxRecord
 import androidx.health.connect.client.records.metadata.Device
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -62,6 +66,13 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         override suspend fun deleteRange(type: KClass<out Record>, range: TimeRangeFilter) = client.deleteRecords(type, range)
     }
 
+    /**
+     * Every write to Health Connect (the worker, turning auto sync on, a saved workout, an edited sleep, the manual
+     * copy) goes through this one lock. A write reads its own records, inserts, then deletes the stale ones, so two
+     * side by side could delete what the other had just inserted.
+     */
+    private val writeLock = Mutex()
+
     /** Every record of [type] in [range] that OpenStrap wrote, a page at a time. */
     private suspend fun <T : Record> readAll(type: KClass<T>, range: TimeRangeFilter): List<T> {
         val out = mutableListOf<T>()
@@ -87,16 +98,18 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     )
 
     /**
-     * Asked for with [permissions], but not needed: without them everything else is still written and the calories
-     * are left out, so a grant from before calories, or one turned off, keeps working.
+     * Asked for with [permissions], but not needed: without them everything else is still written and those records
+     * (calories, breathing rate, VO2 max) are left out, so a grant from before them, or one turned off, keeps working.
      */
-    val caloriePermissions = setOf(
+    val optionalPermissions = setOf(
         HealthPermission.getWritePermission(ActiveCaloriesBurnedRecord::class),
         HealthPermission.getWritePermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getWritePermission(RespiratoryRateRecord::class),
+        HealthPermission.getWritePermission(Vo2MaxRecord::class),
     )
 
-    /** What a write asks Health Connect for. */
-    val requestedPermissions: Set<String> get() = permissions + caloriePermissions
+    /** What a write asks Health Connect for: the needed ones with the optional ones, so they are offered in the same screen. */
+    val requestedPermissions: Set<String> get() = permissions + optionalPermissions
 
     /** Reading back what was exported; history is the permission to read further back than 30 days. */
     val readPermissions: Set<String>
@@ -122,9 +135,9 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     suspend fun hasPermissions(): Boolean =
         client.permissionController.getGrantedPermissions().containsAll(permissions)
 
-    /** Every permission a write asks for, the optional calorie ones too: when not, the write asks again first. */
-    suspend fun hasRequestedPermissions(): Boolean =
-        client.permissionController.getGrantedPermissions().containsAll(requestedPermissions)
+    /** Whether the optional permissions are granted, for the Health Connect page's offer to ask again. */
+    suspend fun hasOptionalPermissions(): Boolean =
+        client.permissionController.getGrantedPermissions().containsAll(optionalPermissions)
 
     /** The record reads the user has granted (any of them is enough to import that kind). */
     suspend fun hasReadPermissions(): Boolean =
@@ -164,18 +177,22 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         records += heartRate(from, to)
         records += steps(from, to)
         records += workouts(dao.appWorkoutsOnce(from, to))
+        val strapSessions = strapWorkouts(from, to)
+        records += strapSessions
         val (kcal, kcalRanges) = calories(from, to, now)
         records += kcal
 
         records += sleep(from, to, now)
+        records += bloodOxygen(from, to)
 
-        for (o in dao.spo2Once(from, to)) {
-            if (o.percent !in 70..100) continue
-            records += OxygenSaturationRecord(
-                time = Instant.ofEpochSecond(o.timestamp), zoneOffset = offset(o.timestamp),
-                percentage = Percentage(o.percent.toDouble()),
-                metadata = meta("spo2:${o.timestamp}"),
-            )
+        // Each only with its permission granted, as the calories are.
+        val granted = client.permissionController.getGrantedPermissions()
+        val replaced = mutableListOf<Pair<KClass<out Record>, TimeRangeFilter>>()
+        if (HealthPermission.getWritePermission(RespiratoryRateRecord::class) in granted) records += breathing(from, to)
+        if (HealthPermission.getWritePermission(Vo2MaxRecord::class) in granted) {
+            // Time is the workout's end, so the range to replace is the one the records are looked up by.
+            replaced += Vo2MaxRecord::class to TimeRangeFilter.between(Instant.ofEpochSecond(from), Instant.ofEpochSecond(to))
+            records += vo2max(from, to)
         }
 
         for (h in dao.hrvOnce(from, to)) {
@@ -190,8 +207,10 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         val resting = restingHr(from, to, ZoneId.systemDefault())
         records += resting
 
-        store.write(records, kcalRanges + (SleepSessionRecord::class to sleepRange(from, to)))
-        store.dropMovedRestingHr(resting)
+        store.writeSerially(writeLock, records, kcalRanges + replaced + (SleepSessionRecord::class to sleepRange(from, to))) {
+            dropMovedRestingHr(resting)
+            dropStaleStrapWorkouts(from, to, strapSessions)
+        }
         return records.size
     }
 
@@ -216,7 +235,7 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
      */
     suspend fun exportSleep(from: Long, to: Long, now: Long = System.currentTimeMillis() / 1000): Int {
         val records = sleep(from, to, now)
-        store.write(records, listOf(SleepSessionRecord::class to sleepRange(from, to)))
+        store.writeSerially(writeLock, records, listOf(SleepSessionRecord::class to sleepRange(from, to)))
         return records.size
     }
 
@@ -280,7 +299,9 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
         val (from, to) = AutoHealthConnect.workoutRange(w.from, end, now)
         val (kcal, kcalRanges) = calories(w.from, end, now)
         val records = heartRate(from, to) + steps(from, to) + workouts(listOf(w)) + kcal
-        store.write(records, kcalRanges)
+        // A strap workout this one now overlaps was written before it was known; its record goes.
+        val strap = strapWorkouts(w.from, end)
+        store.writeSerially(writeLock, records, kcalRanges) { dropStaleStrapWorkouts(w.from, end, strap) }
         return records.size
     }
 
@@ -353,6 +374,71 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
             count = m.steps.toLong(),
             metadata = meta("steps:${m.timestamp}"),
         )
+    }
+
+    /**
+     * One blood oxygen record per stored reading, the percent as the strap sent it. Only 80 to 100, the range Zepp
+     * keeps and so the one stored ([org.openstrap.protocol.history.SpO2Reading.isPlausible]).
+     */
+    internal suspend fun bloodOxygen(from: Long, to: Long): List<Record> = dao.spo2Once(from, to)
+        .filter { it.percent in SPO2_KEPT }
+        .map { o ->
+            OxygenSaturationRecord(
+                time = Instant.ofEpochSecond(o.timestamp), zoneOffset = offset(o.timestamp),
+                percentage = Percentage(o.percent.toDouble()),
+                metadata = meta("spo2:${o.timestamp}"),
+            )
+        }
+
+    /** Breathing rate: one record per stored sample, the value as the strap sent it. */
+    internal suspend fun breathing(from: Long, to: Long): List<Record> = dao.breathRateOnce(from, to).map { b ->
+        RespiratoryRateRecord(
+            time = Instant.ofEpochSecond(b.timestamp), zoneOffset = offset(b.timestamp),
+            rate = b.perMinute.toDouble(),
+            metadata = meta("breath:${b.timestamp}"),
+        )
+    }
+
+    /**
+     * The strap's own VO2 max, one record per strap workout that has a figure of 1 to 100 (the workout's, else its
+     * sport effect's, as the app shows it), at the workout's end, [Workouts.endOf] with its effect. Only the records
+     * with that time in [from, to] are returned, so a replaced range matches them. OpenStrap's own estimates aren't sent.
+     */
+    internal suspend fun vo2max(from: Long, to: Long): List<Record> {
+        val reach = org.openstrap.app.data.Workouts.EFFECT_WINDOW_S
+        val effects = dao.sportEffectsOnce(from, to + reach)
+        return dao.workoutsOnce(from - reach, to).mapNotNull { w ->
+            val effect = org.openstrap.app.data.Workouts.effectOf(w, effects)
+            val value = (w.vo2max ?: effect?.vo2max?.let(Math::round))?.takeIf { it in 1..100 } ?: return@mapNotNull null
+            val time = effect?.end ?: w.end
+            if (time !in from..to) return@mapNotNull null
+            Vo2MaxRecord(
+                time = Instant.ofEpochSecond(time), zoneOffset = offset(time),
+                vo2MillilitersPerMinuteKilogram = value.toDouble(),
+                measurementMethod = Vo2MaxRecord.MEASUREMENT_METHOD_OTHER,
+                metadata = meta("vo2max:${w.start}"),
+            )
+        }
+    }
+
+    /**
+     * Workouts the strap recorded, as exercise sessions. The strap also records its own session for a workout started
+     * on the phone, so one overlapping a phone workout is left out (that one goes out as [workouts]). No calories: they
+     * go out by the hour and day.
+     */
+    internal suspend fun strapWorkouts(from: Long, to: Long): List<Record> {
+        val strap = dao.workoutsOnce(from, to).filter { it.end > it.start }
+        if (strap.isEmpty()) return emptyList()
+        val phone = dao.appWorkoutsOnce(strap.minOf { it.start }, strap.maxOf { it.end })
+        return strap.filter { w -> phone.none { it.from < w.end && (it.end ?: Long.MAX_VALUE) > w.start } }.map { w ->
+            androidx.health.connect.client.records.ExerciseSessionRecord(
+                startTime = Instant.ofEpochSecond(w.start), startZoneOffset = offset(w.start),
+                endTime = Instant.ofEpochSecond(w.end), endZoneOffset = offset(w.end),
+                exerciseType = exerciseType(w.sportType),
+                title = org.openstrap.app.data.Workouts.sportName(w.sportType),
+                metadata = meta("strapworkout:${w.start}"),
+            )
+        }
     }
 
     /** Workouts recorded on the phone, as exercise sessions; GPS distance with them (a step estimate stays here). */
@@ -523,6 +609,20 @@ internal suspend fun RecordStore.write(records: List<Record>, replaced: List<Pai
     }
 }
 
+/**
+ * [write] with [after] (more work on the same store, such as taking out moved records), all under [lock], so no other
+ * writer's read, insert and delete runs in between.
+ */
+internal suspend fun RecordStore.writeSerially(
+    lock: Mutex,
+    records: List<Record>,
+    replaced: List<Pair<KClass<out Record>, TimeRangeFilter>>,
+    after: suspend RecordStore.() -> Unit = {},
+) = lock.withLock {
+    write(records, replaced)
+    after()
+}
+
 /** The most records one Health Connect call takes. */
 internal const val HC_BATCH = 500
 
@@ -547,6 +647,29 @@ internal suspend fun RecordStore.dropMovedRestingHr(written: List<RestingHeartRa
         .map { it.metadata.id }
     stale.chunked(HC_BATCH).forEach { deleteIds(RestingHeartRateRecord::class, it) }
 }
+
+/**
+ * Takes out OpenStrap's own strap workout sessions in [from, to] that aren't in [written]: a workout since deleted, or
+ * one a phone workout now overlaps. Phone workouts' own sessions are left alone, and nothing is taken out when the
+ * records can't be read. Run after [written] is in.
+ */
+internal suspend fun RecordStore.dropStaleStrapWorkouts(from: Long, to: Long, written: List<Record>) {
+    val own = ownRecords(
+        androidx.health.connect.client.records.ExerciseSessionRecord::class,
+        TimeRangeFilter.between(Instant.ofEpochSecond(from), Instant.ofEpochSecond(to)),
+    ) ?: return
+    val keep = written.mapTo(HashSet()) { it.metadata.clientRecordId }
+    val stale = own.filter { r ->
+        r.metadata.clientRecordId?.startsWith(STRAP_WORKOUT_PREFIX) == true && r.metadata.clientRecordId !in keep
+    }.map { it.metadata.id }
+    stale.chunked(HC_BATCH).forEach { deleteIds(androidx.health.connect.client.records.ExerciseSessionRecord::class, it) }
+}
+
+/** The blood oxygen percents that are kept, and so exported: Zepp's range. */
+private val SPO2_KEPT = 80..100
+
+/** The start of a strap workout session's clientRecordId. */
+private const val STRAP_WORKOUT_PREFIX = "openstrap:strapworkout:"
 
 /** A resting heart rate record's date where it was written, by its own offset, or null without one. */
 private fun dateOf(r: RestingHeartRateRecord): java.time.LocalDate? = r.zoneOffset?.let { r.time.atOffset(it).toLocalDate() }

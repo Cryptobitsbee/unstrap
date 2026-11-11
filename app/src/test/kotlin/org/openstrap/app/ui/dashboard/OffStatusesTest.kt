@@ -9,7 +9,6 @@ import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.data.db.SleepSession
 import org.openstrap.app.data.settings.UserProfile
-import org.openstrap.app.presentation.ChartPoint
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -119,13 +118,5 @@ class OffStatusesTest {
         assertEquals(OffStatus.Usual, habitAgeOffStatus(habit(40, 36, 40)))
         assertEquals(OffStatus.Usual, habitAgeOffStatus(Healthspan.Outcome(null, null)))
         assertEquals(OffStatus.Usual, habitAgeOffStatus(null))
-    }
-
-    @Test fun `stress is the day's mean against your normal`() {
-        val samples = listOf(ChartPoint(0, 60f), ChartPoint(60, 80f))
-        assertEquals(70f, stressMean(samples)!!, 0.001f)
-        assertNull(stressMean(emptyList()))
-        assertEquals(OffStatus.Above, stressOffStatus(samples, History.Normal(40f, 30f, 50f, 20)))
-        assertEquals(OffStatus.Usual, stressOffStatus(emptyList(), History.Normal(40f, 30f, 50f, 20)))
     }
 }

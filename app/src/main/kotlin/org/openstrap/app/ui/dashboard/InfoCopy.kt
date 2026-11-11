@@ -358,7 +358,7 @@ object InfoCopy {
         if (strapScore != null) add(strings.format(R.string.day_info_recovery_note_strap, strapScore))
         ready ?: return@buildList
         if (ready.capped) add(strings.get(R.string.day_info_recovery_note_capped))
-        ready.fallbackHrv?.let { add(strings.format(R.string.day_info_recovery_note_hrv, it.toInt())) }
+        ready.fallbackHrv?.let { add(strings.format(R.string.day_info_recovery_note_hrv, Math.round(it))) }
         ready.fallbackRestingHr?.let { add(strings.format(R.string.day_info_recovery_note_resting_hr, it.toInt())) }
         if (ready.hrvWeekThin) add(strings.format(R.string.day_info_recovery_note_week_thin, ready.hrvWeekNights))
     }

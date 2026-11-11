@@ -35,6 +35,7 @@ import org.openstrap.app.ui.glow.PagePanel
 import org.openstrap.app.ui.glow.PageRow
 import org.openstrap.app.ui.glow.PageRows
 import org.openstrap.app.ui.theme.AppIcons
+import org.openstrap.app.update.Check
 import org.openstrap.app.update.Install
 import org.openstrap.app.update.NoteBlock
 import org.openstrap.app.update.NoteSpan
@@ -81,7 +82,7 @@ fun UpdatesPage(
                 PageRow(
                     stringResource(R.string.you_updates_check_now), UpdateCopy.checkStatus(state, now), onClick = onCheck, below = true,
                     divider = newest != null,
-                    enabled = !state.checking, icon = AppIcons.Refresh04,
+                    enabled = state.check != Check.Checking, icon = AppIcons.Refresh04,
                 )
                 PageSwitchRow(
                     stringResource(R.string.you_updates_daily), stringResource(R.string.you_updates_daily_note), auto, onAuto,

@@ -7,6 +7,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -88,8 +90,38 @@ class BackupSnapshotTest {
         assertEquals(10, lines(zip, "activity_minute.csv").size)
         // The copy was made and is gone again.
         assertFalse(logged.toString(), logged.any { "no copy" in it })
-        assertFalse(File(context.cacheDir, "backup-snapshot.db").exists())
+        assertEquals(emptyList<String>(), snapshotFiles())
         // The sync's rows are in the database itself.
         assertEquals(11, db.healthDao().heartRateOnce(t, t + 7200).size)
+    }
+
+    /** The snapshot files left in the cache. */
+    private fun snapshotFiles() = context.cacheDir.listFiles { f -> f.name.startsWith("backup-snapshot") }.orEmpty().map { it.name }
+
+    @Test fun `two copies at once use different files and each cleans up its own`() {
+        val a = BackupSnapshot.take(context, db)
+        val b = BackupSnapshot.take(context, db)
+        assertEquals(2, snapshotFiles().filter { it.endsWith(".db") }.size)
+        a.close()
+        assertEquals(1, snapshotFiles().filter { it.endsWith(".db") }.size)
+        b.close()
+        assertEquals(emptyList<String>(), snapshotFiles())
+    }
+
+    @Test fun `data jobs run one at a time and a job inside a job doesn't wait on itself`() = runBlocking {
+        val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val first = scope.launch {
+            DataJobs.exclusive {
+                order += "a start"
+                // Calling another data job from inside one goes straight through.
+                DataJobs.exclusive { order += "a inner" }
+                delay(100)
+                order += "a end"
+            }
+        }
+        delay(30)
+        val second = scope.launch { DataJobs.exclusive { order += "b" } }
+        first.join(); second.join()
+        assertEquals(listOf("a start", "a inner", "a end", "b"), order)
     }
 }

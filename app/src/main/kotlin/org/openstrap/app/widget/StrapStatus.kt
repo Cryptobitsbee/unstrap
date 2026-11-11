@@ -23,17 +23,30 @@ sealed interface StrapStatus {
 
     /** The stale line's sync, under way. */
     data object Syncing : StrapStatus
+
+    /** The last sync failed and none has worked since, the app's own "not synced". A tap syncs. */
+    data object SyncFailed : StrapStatus
+
+    /** Bluetooth is off on the phone. Opens the Strap page, which turns it on. */
+    data object BluetoothOff : StrapStatus
 }
 
 /**
- * The status line, first match wins: not [paired], then [battery] at [StrapBands.LOW_BATTERY] or less and not [charging],
- * then [lastSync] (epoch seconds) more than [StrapBands.STALE_AFTER_S] before [now]. While [syncing] the stale line reads
- * Syncing instead; a sync while all is well shows nothing, so the background syncs don't flash a line. Before the
- * first sync is known there's no time to give, so no line.
+ * The status line, first match wins: not [paired], then [bluetoothOff], then [battery] at [StrapBands.LOW_BATTERY] or
+ * less and not [charging], then a failed sync ([failingSince] set, the app's "not synced"), then [lastSync] (epoch
+ * seconds) more than [StrapBands.STALE_AFTER_S] before [now]. While [syncing] the last two read Syncing instead; a sync
+ * while all is well shows nothing, so the background syncs don't flash a line. Before the first sync is known there's
+ * no time to give, so no line.
  */
-fun strapStatus(paired: Boolean, battery: Int?, charging: Boolean, lastSync: Long?, now: Long, syncing: Boolean = false): StrapStatus? = when {
+@Suppress("LongParameterList") // Each one is a fact the line reads.
+fun strapStatus(
+    paired: Boolean, battery: Int?, charging: Boolean, lastSync: Long?, now: Long, syncing: Boolean = false,
+    failingSince: Long? = null, bluetoothOff: Boolean = false,
+): StrapStatus? = when {
     !paired -> StrapStatus.NotPaired
+    bluetoothOff -> StrapStatus.BluetoothOff
     battery != null && StrapBands.lowBattery(battery, charging) -> StrapStatus.LowBattery(battery)
+    failingSince != null -> if (syncing) StrapStatus.Syncing else StrapStatus.SyncFailed
     syncStale(lastSync, now) -> if (syncing) StrapStatus.Syncing else StrapStatus.StaleSync(lastSync!!)
     else -> null
 }
@@ -41,10 +54,17 @@ fun strapStatus(paired: Boolean, battery: Int?, charging: Boolean, lastSync: Lon
 /** True when the last sync ended more than [StrapBands.STALE_AFTER_S] before [now] ([StrapBands.stale]). */
 fun syncStale(lastSync: Long?, now: Long): Boolean = StrapBands.stale(lastSync, now)
 
-/** True when the line for the strap's state could read otherwise: pairing, the low battery edge or charging changed. */
-fun strapStateChanged(paired: Boolean, battery: Int?, charging: Boolean, wasPaired: Boolean, wasBattery: Int?, wasCharging: Boolean): Boolean {
+/**
+ * True when the line for the strap's state could read otherwise: pairing, the low battery edge, charging or whether
+ * syncs are failing ([failing], [wasFailing]) changed.
+ */
+@Suppress("LongParameterList") // The old and new of each fact the line reads.
+fun strapStateChanged(
+    paired: Boolean, battery: Int?, charging: Boolean, wasPaired: Boolean, wasBattery: Int?, wasCharging: Boolean,
+    failing: Boolean = false, wasFailing: Boolean = false,
+): Boolean {
     fun low(b: Int?) = b != null && b <= StrapBands.LOW_BATTERY
-    return paired != wasPaired || charging != wasCharging || low(battery) != low(wasBattery)
+    return paired != wasPaired || charging != wasCharging || low(battery) != low(wasBattery) || failing != wasFailing
 }
 
 /**
@@ -57,6 +77,8 @@ fun strapStatusLine(
     StrapStatus.NotPaired -> strings.get(R.string.system_widget_status_not_paired)
     is StrapStatus.LowBattery -> strings.format(R.string.system_widget_status_low_battery, status.percent)
     StrapStatus.Syncing -> strings.get(R.string.system_widget_status_syncing)
+    StrapStatus.SyncFailed -> strings.get(R.string.system_widget_status_not_synced)
+    StrapStatus.BluetoothOff -> strings.get(R.string.system_widget_status_bluetooth_off)
     is StrapStatus.StaleSync -> strings.format(R.string.system_widget_status_synced, syncedWhen(status.at, now, zone, locale))
 }
 

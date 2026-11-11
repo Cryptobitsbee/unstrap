@@ -4,7 +4,11 @@ import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.time.TimeRangeFilter
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,5 +84,27 @@ class RecordStoreTest {
         store.write(listOf(sleep(1000, "openstrap:sleep:1000")), listOf(SleepSessionRecord::class to range))
         assertEquals(listOf("deleteRange", "insert"), store.calls)
         assertEquals(listOf("openstrap:sleep:1000"), store.records.map { it.metadata.clientRecordId })
+    }
+
+    @Test fun `writers sharing a lock never run side by side`() = runTest {
+        val lock = Mutex()
+        var inside = 0
+        var overlapped = false
+        // A store that lets other coroutines run during its insert, as a real Health Connect call does.
+        val slow = object : RecordStore {
+            override suspend fun insert(records: List<Record>) {
+                inside++
+                if (inside > 1) overlapped = true
+                yield()
+                inside--
+            }
+            override suspend fun ownRecords(type: KClass<out Record>, range: TimeRangeFilter): List<Record>? = emptyList()
+            override suspend fun deleteIds(type: KClass<out Record>, ids: List<String>) = Unit
+            override suspend fun deleteRange(type: KClass<out Record>, range: TimeRangeFilter) = Unit
+        }
+        val one = listOf(sleep(1000, "openstrap:sleep:1000"))
+        val writers = List(4) { async { slow.writeSerially(lock, one, listOf(SleepSessionRecord::class to range)) } }
+        writers.awaitAll()
+        assertTrue(!overlapped)
     }
 }

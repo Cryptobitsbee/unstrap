@@ -30,7 +30,7 @@ object RecoveryCopy {
         is Recovery.Detail.Breathing -> strings.format(R.string.core_data_recovery_breathing, Signed.of(d.vsUsual, 1, locale))
         is Recovery.Detail.BloodOxygen -> strings.format(
             R.string.core_data_recovery_blood_oxygen,
-            String.format(locale, "%.1f", d.percent),
+            whole(Math.round(d.percent), locale),
             Signed.of(d.vsUsual, 1, locale),
         )
         is Recovery.Detail.Load -> strings.format(R.string.core_data_recovery_load, whole(d.yesterday, locale), whole(d.usual, locale))

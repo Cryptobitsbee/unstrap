@@ -15,9 +15,12 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.openstrap.app.presentation.StageSpan
+import org.openstrap.app.ui.glow.GlowType
 import org.openstrap.app.ui.glow.Rim
 import org.openstrap.app.ui.glow.draw.ChartInk
 import org.openstrap.app.ui.glow.draw.stageColor
@@ -31,9 +34,9 @@ import kotlin.math.sin
 /*
  * The line-like pictures (spec 2.7): Heart rate's day line through your resting band, Stress's day strip, Skin
  * temperature's dial, Sleep regularity's bed and wake bars and the day with the naps on it. Each draws in its metric's
- * ink to fill its modifier, solid, never dotted or dashed and with no digits, and each but the naps has a rim function
- * saying where on the card the off part sits (spec 2.5). The geometry is in plain functions so it is tested without a
- * screen.
+ * ink to fill its modifier, solid, never dotted or dashed and with no digits (but the dial's reading), and each but the
+ * naps has a rim function saying where on the card the off part sits (spec 2.5). The geometry is in plain functions so it
+ * is tested without a screen.
  */
 
 /* ------------------------------------------------------------------------------------------------ */
@@ -188,7 +191,7 @@ fun DayStrip(levels: List<Float?>, ink: Color, size: PictureSize, modifier: Modi
     }
 }
 
-/** Where Stress's card lights when above usual (spec 2.5): at the strip's end, the latest stretch. Null with none. */
+/** Where Stress's card lights when its latest reading is High (spec 2.5): at the strip's end, the latest stretch. Null with none. */
 fun dayStripRim(levels: List<Float?>, size: PictureSize, slots: Int = levels.size): Rim? {
     val last = stripStretches(levels, slots).lastOrNull() ?: return null
     return Rim(lineCardX(last.x1, size), lineCardY(0.5f), reachX = 0.6f, reachY = 1.1f)
@@ -227,7 +230,8 @@ internal fun dialPoint(fit: DialFit, angle: Float, inset: Float = 0f): Offset {
  * Skin temperature's picture (spec 2.7, Dial): a half dial reaching [DIAL_RANGE] either side of your normal, a white
  * track at 8%, your [normal] (a deviation range in °C, like -0.3..0.3) as a band of [ink] at the top, and a needle at
  * tonight's [deviation] in the ink. Centred in its modifier: on a Wide the card puts the number left and gives the dial
- * a square-ish box at the right ([WIDE_DIAL_CENTER_X]).
+ * a square-ish box at the right ([WIDE_DIAL_CENTER_X]). The [reading], when given, is the dial's one line of text, at
+ * the foot of the arc inside the needle's reach, in the larger type if it fits there ([dialReadingFits]).
  */
 @Composable
 fun TempDial(
@@ -236,7 +240,9 @@ fun TempDial(
     ink: Color,
     size: PictureSize,
     modifier: Modifier = Modifier,
+    reading: String? = null,
 ) {
+    val measurer = rememberTextMeasurer()
     Canvas(modifier.pictureArea(size)) {
         val track = 4.dp.toPx()
         val bandW = 9.dp.toPx()
@@ -257,8 +263,21 @@ fun TempDial(
             drawLine(ink, dialPoint(fit, angle, fit.radius * 0.55f), dialPoint(fit, angle, dot), 2.dp.toPx(), StrokeCap.Round)
             drawCircle(ink, dot, tip)
         }
+        if (reading != null) {
+            val large = measurer.measure(reading, GlowType.secondary.copy(color = Color.White))
+            val text = if (dialReadingFits(large.size.width.toFloat(), large.size.height.toFloat(), fit.radius)) large
+            else measurer.measure(reading, GlowType.caption.copy(color = Color.White))
+            drawText(text, topLeft = Offset(fit.center.x - text.size.width / 2f, fit.center.y - text.size.height))
+        }
     }
 }
+
+/** The share of the dial's radius left clear of the needle, which starts 55% of the way out. */
+private const val DIAL_CLEAR_SHARE = 0.55f
+
+/** Whether a [width] by [height] text, centred on the foot of a dial of [radius], stays inside the needle's reach. */
+internal fun dialReadingFits(width: Float, height: Float, radius: Float): Boolean =
+    kotlin.math.hypot(width / 2, height) <= radius * DIAL_CLEAR_SHARE
 
 /** Where a Wide's dial sits across the card: in a square-ish box at the right, after the number. */
 const val WIDE_DIAL_CENTER_X = 0.78f

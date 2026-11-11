@@ -179,4 +179,8 @@
     <string name="workout_live_exercise_use">使用此名称</string>
     <string name="workout_live_exercise_now">当前</string>
     <string name="workout_live_exercise_no_name">不命名，仅按组编号</string>
+
+    <string name="workout_live_not_saved_title">尚未保存</string>
+    <string name="workout_live_not_saved_note">运动未能保存，仍在继续记录。</string>
+    <string name="workout_live_try_again">重试</string>
 </resources>

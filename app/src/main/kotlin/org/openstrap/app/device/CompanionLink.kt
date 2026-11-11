@@ -41,6 +41,12 @@ class CompanionLink(private val context: Context, private val settings: Settings
     /** True when the paired strap is associated; refreshed by [refresh], on association and on [disassociate]. */
     val associated = MutableStateFlow(false)
 
+    /**
+     * True after the user backed out of Android's prompt: the offer is hidden until the app starts again, and the row
+     * shows the battery setting meanwhile. Not kept: backing out is not a refusal for good.
+     */
+    val offerHidden = MutableStateFlow(false)
+
     /** True when the app is already left out of battery optimization, whichever way that happened. */
     val ignoringBatteryOptimizations = MutableStateFlow(false)
 
@@ -73,11 +79,13 @@ class CompanionLink(private val context: Context, private val settings: Settings
      * which [launch] starts; pass the activity result to [onResult]. [onError] gets a message to show.
      */
     fun associate(activity: Activity, address: String, launch: (IntentSender) -> Unit, onError: (String) -> Unit) {
-        if (cdm == null) return onError(Strings.app.get(R.string.system_companion_unsupported))
+        // A failure is real: the offer is kept off, and the battery setting stands in for it ([declinedForGood]).
+        val fail = { message: String -> declinedForGood(); onError(message) }
+        if (cdm == null) return fail(Strings.app.get(R.string.system_companion_unsupported))
         // The activity's own manager: before Android 13 associate() casts the manager's context to an Activity, and
         // one from the application context crashes the app (seen on Android 11).
         val cdm = activity.getSystemService(CompanionDeviceManager::class.java)
-            ?: return onError(Strings.app.get(R.string.system_companion_unsupported))
+            ?: return fail(Strings.app.get(R.string.system_companion_unsupported))
         // The strap is a BLE device; the classic filter also matches it once Android knows it from a connection.
         val request = AssociationRequest.Builder()
             .addDeviceFilter(BluetoothLeDeviceFilter.Builder().setScanFilter(ScanFilter.Builder().setDeviceAddress(address).build()).build())
@@ -99,20 +107,25 @@ class CompanionLink(private val context: Context, private val settings: Settings
             override fun onFailure(error: CharSequence?) {
                 Log.w(TAG, "association failed: $error")
                 val reason = error ?: Strings.app.get(R.string.system_companion_no_reason)
-                onError(Strings.app.format(R.string.system_companion_not_found, reason))
+                fail(Strings.app.format(R.string.system_companion_not_found, reason))
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) cdm.associate(request, activity.mainExecutor, callback)
         else @Suppress("DEPRECATION") cdm.associate(request, callback, Handler(Looper.getMainLooper()))
     }
 
+    private fun declinedForGood() {
+        scope.launch { settings.setCompanionDeclined(true) }
+    }
+
     /**
      * The result of the confirmation [associate] launched. On Android 13+ the association arrives through the
-     * callback. Older versions only report it here. Returns false when the user turned it down.
+     * callback. Older versions only report it here. Returns false when it didn't end in an association: Back
+     * (RESULT_CANCELED) only hides the offer for now ([offerHidden]), any other result is a failure and is kept.
      */
     fun onResult(resultCode: Int): Boolean {
         if (resultCode != Activity.RESULT_OK) {
-            scope.launch { settings.setCompanionDeclined(true) }
+            if (resultCode == Activity.RESULT_CANCELED) offerHidden.value = true else declinedForGood()
             return false
         }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) scope.launch {

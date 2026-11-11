@@ -24,6 +24,17 @@ class StrapPageTest {
         assertEquals("Connecting…", strapStateLine(ConnectionState.Connecting, SyncState.Idle, null, now))
     }
 
+    @Test fun `state line reads the kept sync time, so it survives a restart`() {
+        assertEquals("Connected. Synced 2 min ago", strapStateLine(connected, SyncState.Idle, null, now, lastSync = now - 120))
+        // A push's Done doesn't move it: the full sync's time stands.
+        assertEquals("Connected. Synced 1 h ago", strapStateLine(connected, SyncState.Done(now - 5), null, now, lastSync = now - 3600))
+        assertEquals("Connected. Not synced", strapStateLine(connected, SyncState.Failed("x"), null, now, lastSync = now - 3600))
+    }
+
+    @Test fun `state line says Bluetooth is off`() {
+        assertEquals("Bluetooth is off", strapStateLine(ConnectionState.BluetoothOff, SyncState.Idle, now - 60, now))
+    }
+
     @Test fun `You page values`() {
         val goals = Goals(steps = 8000, sleepMinutes = 450, activeHours = 8, calories = 450)
         assertEquals("8,000 steps, 450 active kcal, 8 active hours", goalsLine(goals, Locale.UK))

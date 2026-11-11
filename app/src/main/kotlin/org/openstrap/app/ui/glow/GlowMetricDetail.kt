@@ -89,9 +89,11 @@ import org.openstrap.app.presentation.Metric
 import org.openstrap.app.ui.dashboard.NIGHTLY
 import org.openstrap.app.ui.dashboard.RELATED
 import org.openstrap.app.presentation.Range
+import org.openstrap.app.presentation.StressLevel
 import org.openstrap.app.ui.dashboard.ScreenList
 import org.openstrap.app.ui.dashboard.avg
 import org.openstrap.app.ui.dashboard.colorOf
+import org.openstrap.app.ui.dashboard.LatestReading
 import org.openstrap.app.ui.dashboard.SleepCopy
 import org.openstrap.app.ui.dashboard.siblingsOf
 import java.time.LocalDate
@@ -493,14 +495,19 @@ internal fun DetailEmpty(text: String) {
 
 private val HOURS = listOf("00", "06", "12", "18", "24")
 
-/** A day's value of [metric]: the live or latest heart rate, the strap's resting heart rate, the day's steps, else the average of its readings. */
+/**
+ * A day's value of [metric]: the live or latest heart rate, the resting heart rate, the day's steps, HRV from the night's
+ * readings, else the average of the day's readings.
+ */
 internal fun dayValue(metric: Metric, state: DayUiState, live: Int? = null): Float? = when (metric) {
     Metric.HeartRate -> (live ?: state.latestHeartRate)?.toFloat()
     Metric.RestingHr -> state.restingHeartRate?.toFloat()
     Metric.Steps -> state.steps.toFloat().takeIf { it > 0f }
-    Metric.Hrv -> state.hrv.avg()?.toFloat()
-    Metric.Spo2 -> state.spo2.avg()?.toFloat()
-    Metric.Stress -> state.stress.avg()?.toFloat()
+    // The night's average, the one HRV figure on every screen ([NightMetrics.sleepHrv]).
+    Metric.Hrv -> SleepCopy.nightValue(state, Metric.Hrv)
+    // The latest reading, as heart rate: blood oxygen's night average is only on the Sleep and Recovery tabs
+    // ([SleepCopy.nightValue]); stress is judged by that reading's level ([StressLevel]).
+    Metric.Spo2, Metric.Stress -> LatestReading.of(metric, state)?.y
     Metric.SkinTemperature -> state.skinTemperature.takeIf { it.isNotEmpty() }?.map { it.y }?.average()?.toFloat()
     Metric.Breathing -> state.breathRate.takeIf { it.isNotEmpty() }?.map { it.y }?.average()?.toFloat()
 }
@@ -565,15 +572,39 @@ fun GlowMetricDetailScreen(
         range == Range.Day -> dayValue(metric, state, live)
         else -> summary?.average
     }
-    // Heart rate's normal is a daily average, not a reading, so the day's reading gets no word; nor does a night's.
+    // Heart rate's normal is a daily average, not a reading, so the day's reading gets no word; nor does a night's,
+    // nor a latest reading (blood oxygen, stress), which has no baseline of its own.
+    val latestReading = !night && range == Range.Day && metric in LatestReading.METRICS
     val status = when {
         fromNight -> History.status(value, nightNormal)
-        range == Range.Year || (range == Range.Day && metric == Metric.HeartRate) -> null
+        range == Range.Year || (range == Range.Day && metric == Metric.HeartRate) || latestReading -> null
         else -> History.status(value, normal)
     }
-    val label = if (night) SleepCopy.nightLabel(metric, range) else DetailCopy.valueLabel(metric, range, live = live != null, today = isToday)
+    val label = if (night) SleepCopy.nightLabel(metric, range) else DetailCopy.valueLabel(
+        metric, range, live = live != null, today = isToday, estimated = metric == Metric.RestingHr && state.restingEstimated,
+        latest = LatestReading.of(metric, state)?.let {
+            DetailCopy.Latest(
+                clock(it.x), asleep = metric == Metric.Spo2 && LatestReading.spo2Asleep(state),
+                level = if (metric == Metric.Stress) StressLevel.of(it.y) else null,
+            )
+        },
+    )
+    // What the day is read against your usual with: the status of its value, or for stress, whose headline is the latest
+    // reading, of the day's average, the figure the sentence under its chart reads.
+    val dayStatus = if (latestReading && metric == Metric.Stress) History.status(state.stress.avg()?.toFloat(), normal) else status
+    // The normal the value is read against, for skin temperature's change from it, which its label says after what the
+    // number is. A day's only: a longer range's value is an average over days, not a level to place against one night.
+    val headNormal = (if (fromNight) nightNormal else normal).takeIf { range == Range.Day }
     val headline = when {
-        value != null -> DetailHeadline(metric.format(value, Units.DOT_LOCALE), label, DetailCopy.statusWord(status))
+        value != null -> DetailHeadline(
+            metric.format(value, Units.DOT_LOCALE), label,
+            // Skin temperature's day says how far it is from your normal, and which side, in place of the plain word.
+            if (metric == Metric.SkinTemperature && headNormal != null && status != null) {
+                DetailCopy.skinChangeWord(metric, value - headNormal.mean, status)
+            } else {
+                DetailCopy.statusWord(status)
+            },
+        )
         night && range == Range.Day -> SleepCopy.nightNoValue(state.sleep != null, isToday).let { (word, why) -> DetailHeadline.none(word, why) }
         night && range == Range.Week ->
             DetailHeadline.none(stringResource(R.string.glow_no_reading), stringResource(R.string.glow_metrics_last_7_nights))
@@ -600,7 +631,7 @@ fun GlowMetricDetailScreen(
             val sentence = when {
                 value == null -> null
                 metric == Metric.HeartRate -> SleepCopy.lowestHeart(state).let { low ->
-                    SleepCopy.nightHeart(low?.y?.toInt(), low?.x?.let(::clock), Math.round(value), isToday)
+                    SleepCopy.nightHeart(low?.y?.let(Math::round), low?.x?.let(::clock), Math.round(value), isToday)
                 }
                 else -> DetailCopy.day(status, org.openstrap.app.presentation.DaySource.Night, isToday, nightDays)
             }
@@ -634,11 +665,11 @@ fun GlowMetricDetailScreen(
         } else if (range == Range.Day) {
             item { DayChart(metric, state, color, value != null, normalOf = { m -> rememberNormal(m, end, history) }) { scrub = it } }
             val sentence = when {
-                value == null -> null
-                metric == Metric.HeartRate -> state.heartRate.takeIf { it.isNotEmpty() }?.let { s ->
-                    DetailCopy.heartDay(s.minOf { it.y }.toInt(), s.maxOf { it.y }.toInt(), isToday)
-                }
-                else -> DetailCopy.day(status, org.openstrap.app.presentation.daySource(metric), isToday, normalDays)
+                // Blood oxygen's latest reading has no sentence; stress's is the day's average against your usual.
+                value == null || (latestReading && metric == Metric.Spo2) -> null
+                // The day's stored lowest and highest readings, the strap's own maximum when higher, not the chart's averages.
+                metric == Metric.HeartRate -> state.heartRateRange?.let { (low, high) -> DetailCopy.heartDay(low, high, isToday) }
+                else -> DetailCopy.day(dayStatus, org.openstrap.app.presentation.daySource(metric), isToday, normalDays)
             }
             if (sentence != null) item { DetailSentence(sentence) }
         } else {
@@ -664,7 +695,7 @@ fun GlowMetricDetailScreen(
             if (sentence != null) item { DetailSentence(sentence) }
         }
         val related = RELATED[metric].orEmpty()
-        if (related.isNotEmpty() || night) item { RelatedList(related, state, history, onOpen, sleepRow = night) }
+        if (related.isNotEmpty() || night) item { RelatedList(related, state, history, onOpen, night = night) }
     }
 
     if (info) {
@@ -672,6 +703,7 @@ fun GlowMetricDetailScreen(
         val sheetStatus = when {
             night -> History.status(SleepCopy.nightValue(state, metric), nightNormal)
             range == Range.Year -> null
+            latestReading -> dayStatus
             else -> History.status(value, normal)
         }
         InfoSheet(
@@ -711,23 +743,29 @@ private fun NightChart(metric: Metric, state: DayUiState, color: Color, onScrub:
     Column(Modifier.padding(top = 8.dp)) {
         GlowLineChart(
             values, height = 220.dp, labels = listOf(clock(window.first), clock(window.last)), color = color, showAverage = false, format = metric::format,
+            yRange = SPO2_AXIS.takeIf { metric == Metric.Spo2 },
             onScrub = { i ->
-                onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot) })
+                onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot, slot) })
             },
         )
     }
 }
 
-/** A scrubbed reading of [metric] in the headline: its value and the time it was taken, "bpm at 22:30". */
-private fun scrubAt(metric: Metric, v: Float, at: Long, strings: Strings = Strings.app) = DetailHeadline(
+/**
+ * A scrubbed point of [metric]'s line in the headline: its value and the time it starts. The line is made of averages
+ * over [slot] seconds, so it says so: "bpm, 5 min average from 22:30".
+ */
+private fun scrubAt(metric: Metric, v: Float, at: Long, slot: Long, strings: Strings = Strings.app) = DetailHeadline(
     metric.format(v, Units.DOT_LOCALE),
     if (metric.unit.isBlank()) {
-        strings.format(R.string.glow_metrics_at_time, clock(at))
+        strings.format(R.string.glow_metrics_average_from_time, slot / SECONDS_PER_MINUTE, clock(at))
     } else {
-        strings.format(R.string.glow_metrics_unit_at_time, metric.unit, clock(at))
+        strings.format(R.string.glow_metrics_unit_average_from_time, metric.unit, slot / SECONDS_PER_MINUTE, clock(at))
     },
     null,
 )
+
+private const val SECONDS_PER_MINUTE = 60L
 
 /** A held hour's steps in the headline: "steps, 09:00 to 10:00". */
 private fun hourSteps(hour: Int, steps: Float, strings: Strings = Strings.app): DetailHeadline {
@@ -738,6 +776,9 @@ private fun hourSteps(hour: Int, steps: Float, strings: Strings = Strings.app): 
 }
 
 private const val MINUTES_PER_HOUR = 60
+
+/** Blood oxygen's chart scale, so the lowest reading doesn't sit on the bottom edge: a fixed 80 to 100 %. */
+private val SPO2_AXIS = 80f..100f
 
 /**
  * The selected day's own chart: steps by the hour, the week of resting heart rates, or the day's readings as a line
@@ -781,10 +822,15 @@ private fun DayChart(metric: Metric, state: DayUiState, color: Color, hasValue: 
                 val values = remember(series, window) { bucket(series, window, slot) }
                 val labels = if (window == day) HOURS else listOf(clock(window.first), clock(window.last))
                 val band = if (metric == Metric.HeartRate) normalOf(Metric.RestingHr)?.let { it.low..it.high } else null
+                // Blood oxygen's hours inside the sleep window are shaded, so a night reading shows as one.
+                val sleep = LatestReading.sleepWindow(state)
+                val shade = if (metric == Metric.Spo2) LatestReading.shadeIndices(sleep, window, slot, values.size) else null
                 GlowLineChart(
-                    values, height = 220.dp, labels = labels, color = color, showAverage = false, band = band, format = metric::format,
+                    values, height = 220.dp, labels = labels, color = color, showAverage = false, band = band, shade = shade,
+                    yRange = SPO2_AXIS.takeIf { metric == Metric.Spo2 },
+                    format = metric::format,
                     onScrub = { i ->
-                        onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot) })
+                        onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot, slot) })
                     },
                 )
             }
@@ -858,10 +904,10 @@ internal fun series(
  * [sleepRow], as a night-scoped detail has, the night's Sleep score leads.
  */
 @Composable
-private fun RelatedList(related: List<Metric>, state: DayUiState, history: DailyHistory, onOpen: (Detail) -> Unit, sleepRow: Boolean = false) {
+private fun RelatedList(related: List<Metric>, state: DayUiState, history: DailyHistory, onOpen: (Detail) -> Unit, night: Boolean = false) {
     RelatedPanel {
-        if (sleepRow) SleepScoreRow(state, divider = false, onOpen)
-        related.forEachIndexed { i, m -> RelatedMetricRow(m, state, history, divider = i > 0 || sleepRow, onOpen) }
+        if (night) SleepScoreRow(state, divider = false, onOpen)
+        related.forEachIndexed { i, m -> RelatedMetricRow(m, state, history, divider = i > 0 || night, onOpen, nightScoped = night) }
     }
 }
 
@@ -893,26 +939,57 @@ internal fun RecoveryScoreRow(ready: org.openstrap.app.data.Recovery.Readiness?,
     ready?.score?.let { org.openstrap.app.presentation.TodayCopy.recoveryWord(it, ready.strainAlert) } ?: NO_VALUE, divider, onOpen,
 )
 
-/** A body signal as a related row: the day's value and its word against your normal, marked when it's off normal. */
+/**
+ * A body signal as a related row: the day's value and its word against your normal, marked when it's off normal. On a
+ * page scoped to the night ([nightScoped]) blood oxygen is the night's average, elsewhere its latest reading, as
+ * stress's is; stress's High tag judges that reading's level.
+ */
 @Composable
-internal fun RelatedMetricRow(m: Metric, state: DayUiState, history: DailyHistory, divider: Boolean, onOpen: (Detail) -> Unit) {
+internal fun RelatedMetricRow(
+    m: Metric, state: DayUiState, history: DailyHistory, divider: Boolean, onOpen: (Detail) -> Unit, nightScoped: Boolean = false,
+) {
     // A night signal reads as everywhere else: last night's against the nights before (SleepCopy.NIGHT_SIGNALS).
-    val night = m in SleepCopy.NIGHT_SIGNALS
+    val night = m in SleepCopy.NIGHT_SIGNALS || (m == Metric.Spo2 && nightScoped)
+    // Blood oxygen and stress on a day-scoped page are their latest reading, which has no normal to be read against.
+    val latest = m in LatestReading.METRICS && !night
     val dayNormal = rememberNormal(m, state.date, history)
     val normal = if (night) SleepCopy.nightNormal(state, m) else dayNormal
     val v = if (night) SleepCopy.nightValue(state, m) else dayValue(m, state)
-    // The heart rate moves all day, so it has no word against a normal.
-    val status = if (m == Metric.HeartRate) null else History.status(v, normal)
+    // The heart rate moves all day, so it has no word against a normal; nor has a latest reading.
+    val status = if (m == Metric.HeartRate || latest) null else History.status(v, normal)
     // A percent stays on its number, as on Recovery ("99%"): the line under it is the word, not the unit.
+    val tag = relatedTag(m, v, status)
     ListRow(
         m.title, colorOf(m), v?.let { if (m == Metric.Spo2) "${m.format(it)}%" else m.format(it) },
         when {
             v == null -> NO_VALUE
+            // Blood oxygen on a night page is the night's average.
+            night && m == Metric.Spo2 -> stringResource(R.string.glow_today_spo2_night_average)
             // A night signal whose normal is still forming says so, with the count, as on every tab.
             night && normal == null -> SleepCopy.learning(state, m)
+            // The time shows once the reading is an hour old or more.
+            latest -> latestLine(m, state, java.time.Instant.now().epochSecond, tagged = tag != null, time = ::clock)
+            // The tag already says which way it is off.
+            tag != null -> null
             else -> DetailCopy.statusWord(status) ?: m.unit.ifEmpty { null }
         },
-        tag = org.openstrap.app.ui.dashboard.bodyTag(m, status), onClick = { onOpen(Detail.OfMetric(m, night)) }, divider = divider,
+        tag = tag, onClick = { onOpen(Detail.OfMetric(m, night)) }, divider = divider,
         icon = m.rowIcon(),
     )
+}
+
+/** A related row's tag: stress is judged by the level of its reading [v] (High is tagged), the rest by [status] against their normal. */
+private fun relatedTag(m: Metric, v: Float?, status: Int?): org.openstrap.app.ui.dashboard.NewsTag? =
+    if (m == Metric.Stress) v?.let { LatestReading.stressTag(StressLevel.of(it)) } else org.openstrap.app.ui.dashboard.bodyTag(m, status)
+
+/**
+ * The line under [m]'s latest reading of the day in [state] (blood oxygen or stress) at [now]; null without a reading,
+ * or for a stress reading whose High [tagged] tag says it already and is fresh.
+ */
+internal fun latestLine(
+    m: Metric, state: DayUiState, now: Long, strings: Strings = Strings.app, tagged: Boolean = false, time: (Long) -> String,
+): String? {
+    val at = LatestReading.of(m, state) ?: return null
+    return if (m == Metric.Spo2) LatestReading.spo2Line(at.x, LatestReading.sleepWindow(state), now, strings, time)
+    else LatestReading.stressLine(at.x, at.y, now, tagged, strings, time)
 }

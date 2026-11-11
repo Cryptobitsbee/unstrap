@@ -120,6 +120,28 @@
     <string name="glow_today_heart_rate">Heart rate</string>
     <!-- The heart rate card's note on its title row: today's resting heart rate. -->
     <string name="glow_today_resting">Resting <xliff:g id="bpm" example="58">%1$d</xliff:g></string>
+    <!-- The same when the strap sent none and unstrap estimated it. Short, it shares the row with the title. -->
+    <string name="glow_today_resting_estimated" tools:ignore="PluralsCandidate">Resting <xliff:g id="bpm" example="58">%1$d</xliff:g> est.</string>
+    <!-- A stress reading's level, under its number (a card or a row), and the High tag. -->
+    <string name="glow_stress_relaxed">Relaxed</string>
+    <string name="glow_stress_normal">Normal</string>
+    <string name="glow_stress_medium">Medium</string>
+    <string name="glow_stress_high">High</string>
+    <!-- The level with when the reading was taken, once it is an hour old or more. -->
+    <string name="glow_today_stress_level_at"><xliff:g id="level" example="Normal">%1$s</xliff:g>, <xliff:g id="time" example="13:10">%2$s</xliff:g></string>
+    <!-- Under a body list value unstrap estimated itself (the day's resting heart rate), after the word against your normal. -->
+    <string name="glow_today_body_estimated"><xliff:g id="word" example="Within normal">%1$s</xliff:g>, estimated</string>
+    <!-- Under stress's latest reading (a card or a row) once it is an hour old or more: when it was taken. -->
+    <string name="glow_today_latest_at">Latest at <xliff:g id="time" example="14:05">%1$s</xliff:g></string>
+    <!-- Under a body list value unstrap estimated itself, when its tag already says which way it is off. -->
+    <string name="glow_today_estimated">Estimated</string>
+    <!-- Under a blood oxygen reading (a card or a row): when in the day it was taken. The "at" form says the time, once the reading is an hour old or more. -->
+    <string name="glow_today_spo2_daytime">Daytime</string>
+    <string name="glow_today_spo2_daytime_at">Daytime, <xliff:g id="time" example="12:50">%1$s</xliff:g></string>
+    <string name="glow_today_spo2_asleep">While asleep</string>
+    <string name="glow_today_spo2_asleep_at">While asleep, <xliff:g id="time" example="05:10">%1$s</xliff:g></string>
+    <!-- Under blood oxygen where it is the night's average (the Sleep and Recovery tabs). -->
+    <string name="glow_today_spo2_night_average">Night average</string>
     <!-- Title of the steps card. -->
     <string name="glow_today_steps_title">Steps</string>
     <!-- The steps card's note on its title row: your daily goal. -->

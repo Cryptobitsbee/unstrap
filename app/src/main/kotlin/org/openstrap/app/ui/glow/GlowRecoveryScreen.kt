@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.style.TextOverflow
 import kotlin.math.roundToInt
+import org.openstrap.app.presentation.StressLevel
 import org.openstrap.app.presentation.Units
 import org.openstrap.app.ui.components.cardNumber
 import org.openstrap.app.ui.dashboard.SleepCopy
@@ -20,8 +21,7 @@ import org.openstrap.app.ui.dashboard.OffWords
 import org.openstrap.app.ui.dashboard.bodyOffStatus
 import org.openstrap.app.ui.dashboard.bodyTag
 import org.openstrap.app.ui.dashboard.offTag
-import org.openstrap.app.ui.dashboard.stressMean
-import org.openstrap.app.ui.dashboard.stressOffStatus
+import org.openstrap.app.ui.dashboard.LatestReading
 import org.openstrap.app.ui.glow.pictures.PictureSize
 import org.openstrap.app.ui.glow.pictures.RangeFill
 import org.openstrap.app.ui.glow.pictures.SplitBar
@@ -53,13 +53,13 @@ import org.openstrap.app.data.History
 import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.presentation.AFTER_FIRST_NIGHT
-import org.openstrap.app.ui.dashboard.DailyHistory
 import org.openstrap.app.ui.dashboard.FIRST_SCORE
 import org.openstrap.app.ui.dashboard.PARTIAL_DAY
 import org.openstrap.app.ui.dashboard.Wear
 import org.openstrap.app.ui.dashboard.DayUiState
 import org.openstrap.app.ui.dashboard.InfoCopy
 import org.openstrap.app.ui.dashboard.Score
+import org.openstrap.app.presentation.DetailCopy
 import org.openstrap.app.presentation.Metric
 import org.openstrap.app.ui.dashboard.FAILED_SHORT
 import org.openstrap.app.ui.dashboard.RECOVERY_FAILED
@@ -90,7 +90,6 @@ import org.openstrap.app.ui.glow.draw.DotSize
 fun GlowRecoveryScreen(
     state: DayUiState,
     recovery: RecoveryResult?,
-    history: DailyHistory,
     /** The tab's header, or a back header when the screen is opened from a card on another tab. */
     header: @Composable () -> Unit,
     contentPadding: PaddingValues,
@@ -117,9 +116,9 @@ fun GlowRecoveryScreen(
     firstScore: Boolean = false,
 ) {
     val list = rememberLazyListState()
-    val signals = rememberSignals(state, history)
-    val r = recovery?.takeIf { it.date == state.date }
-    val failure = recoveryFailure?.takeIf { it.date == state.date && r == null }
+    val signals = rememberSignals(state)
+    val r = recovery
+    val failure = recoveryFailure?.takeIf { r == null }
     val learning = r?.readiness?.calibrating == true
     val firstNights = r != null && !r.charge.anchored
     val waiting = if (firstNights) AFTER_FIRST_NIGHT else NO_READING
@@ -415,9 +414,10 @@ private fun ChargeSmall(c: Recovery.ChargeDay?, recharged: Boolean, modifier: Mo
 private const val DIAL_SHARE = 0.44f
 
 /**
- * Skin temperature as a short Wide (spec 5.1): the change from your normal in dots with °C and its off tag at the
- * left, the dial at the right centred on your normal. Off your normal the rim lights at the dial's top when above, its
- * foot when below. Before there's a normal it waits for one. Opens the skin temperature detail.
+ * Skin temperature as a short Wide (spec 5.1): last night's average in dots with °C and its off tag at the left, the
+ * dial at the right centred on your normal with the change from it written in the arc. Off your normal the rim lights at the
+ * dial's top when above, its foot when below. Before there's a normal the line says how far along it is. Opens the skin
+ * temperature detail.
  */
 @Composable
 private fun SkinTempCard(
@@ -438,12 +438,10 @@ private fun SkinTempCard(
             Column(Modifier.weight(1f)) {
                 CardTitle(stringResource(R.string.glow_recovery_skin_temperature))
                 Spacer(Modifier.height(12.dp))
-                // Off your normal the tag says which way, and nothing under the number repeats it.
+                // Last night's average, as the Sleep tab shows it; the change from your normal is read in the dial.
                 NumberWithTag(tag) {
                     androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.Bottom) {
-                        // Against your normal once there is one; until then last night's reading, as the Sleep tab shows it.
-                        val shown = deviation?.let { Metric.SkinTemperature.formatChange(it, Units.DOT_LOCALE) }
-                            ?: today?.let { Metric.SkinTemperature.format(it, Units.DOT_LOCALE) }
+                        val shown = today?.let { Metric.SkinTemperature.format(it, Units.DOT_LOCALE) }
                         if (shown != null) DotMatrixText(shown, Modifier.cardNumber(shown), dot = DotSize.Edge)
                         else WaitingDash(Modifier.padding(vertical = 8.dp))
                         if (shown != null) Text(
@@ -452,11 +450,11 @@ private fun SkinTempCard(
                         )
                     }
                 }
+                // The change from your normal is the dial's reading; the line under the number is for when there is none.
                 val line = when {
                     today == null -> waiting
                     normal == null || deviation == null -> learning ?: TodayCopy.normalWord(null)
-                    tag != null -> null
-                    else -> stringResource(R.string.glow_recovery_skin_close)
+                    else -> null
                 }
                 if (line != null) Text(
                     line,
@@ -464,7 +462,10 @@ private fun SkinTempCard(
                     modifier = Modifier.padding(top = 6.dp), maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
             }
-            TempDial(deviation, band, MetricColors.temperature, PictureSize.Wide, Modifier.fillMaxWidth(DIAL_SHARE).height(84.dp))
+            TempDial(
+                deviation, band, MetricColors.temperature, PictureSize.Wide, Modifier.fillMaxWidth(DIAL_SHARE).height(84.dp),
+                reading = deviation?.let { DetailCopy.changeWithUnit(Metric.SkinTemperature, it) },
+            )
         }
     }
 }
@@ -481,31 +482,37 @@ private class BodySignal(
     val tag: NewsTag?,
     /** What the row says while its normal is forming, "Learning, 5 of 7 nights"; null for the plain word. */
     val learning: String? = null,
+    /** What the row says instead of a word against your normal: the night average, or when the day's latest reading was taken. */
+    val line: String? = null,
 )
 
 /** The Recovery tab's body signals: the rows of the list and skin temperature for its own card. */
 private class Signals(val rows: List<BodySignal>, val skin: Float?, val skinNormal: History.Normal?, val skinLearning: String?)
 
 /**
- * Loads the last 30 days of each body signal, enough for its normal ([rememberNormal], keyed on the day and the
- * history, each normal worked out once per load), and the signals once per day state (audit K8). Breathing rate,
+ * The body signals once per day state (audit K8), each night signal against its normal. Breathing rate,
  * blood oxygen and stress make the list (spec 5.1): HRV and resting heart rate are in What drove it already.
  */
 @Composable
-private fun rememberSignals(state: DayUiState, history: DailyHistory): Signals {
-    val stress = rememberNormal(Metric.Stress, state.date, history)
+private fun rememberSignals(state: DayUiState): Signals {
     val breathName = stringResource(R.string.glow_recovery_breathing_rate)
     val spo2Name = stringResource(R.string.glow_recovery_blood_oxygen)
     val stressName = stringResource(R.string.glow_recovery_stress)
-    return remember(state, stress) {
-        fun body(metric: Metric, name: String, accent: Color, today: Float?, normal: History.Normal?, unit: String = ""): BodySignal {
+    val nightAverage = stringResource(R.string.glow_today_spo2_night_average)
+    return remember(state) {
+        fun body(
+            metric: Metric, name: String, accent: Color, today: Float?, normal: History.Normal?, unit: String = "", line: String? = null,
+        ): BodySignal {
             val direction = History.status(today, normal)
             return BodySignal(
                 metric, name, accent, today?.let { metric.format(it) + unit }, direction, bodyTag(metric, direction),
-                SleepCopy.learning(state, metric),
+                SleepCopy.learning(state, metric), line,
             )
         }
-        val stressToday = stressMean(state.stress)
+        // The row's number is the latest reading; its word is that reading's level, and only a High one is tagged.
+        val stressLatest = LatestReading.stress(state)
+        val stressTag = stressLatest?.let { LatestReading.stressTag(StressLevel.of(it.y)) }
+        val now = java.time.Instant.now().epochSecond
         Signals(
             listOf(
                 // Night signals: last night's against the nights before, as the Sleep tab and their details read them.
@@ -515,11 +522,12 @@ private fun rememberSignals(state: DayUiState, history: DailyHistory): Signals {
                 ),
                 body(
                     Metric.Spo2, spo2Name, MetricColors.spo2, SleepCopy.nightValue(state, Metric.Spo2),
-                    SleepCopy.nightNormal(state, Metric.Spo2), unit = "%",
+                    SleepCopy.nightNormal(state, Metric.Spo2), unit = "%", line = nightAverage,
                 ),
                 BodySignal(
-                    Metric.Stress, stressName, MetricColors.stress, stressToday?.let { Metric.Stress.format(it) },
-                    History.status(stressToday, stress), offTag(OffWords.Usual, stressOffStatus(state.stress, stress)),
+                    Metric.Stress, stressName, MetricColors.stress, stressLatest?.let { Metric.Stress.format(it.y) },
+                    null, stressTag,
+                    line = stressLatest?.let { LatestReading.stressLine(it.x, it.y, now, tagged = stressTag != null, time = ::clock) },
                 ),
             ),
             // Tonight's against the nights before (spec 2.7, Dial): the day's mean counts hours off the wrist, which
@@ -531,16 +539,19 @@ private fun rememberSignals(state: DayUiState, history: DailyHistory): Signals {
     }
 }
 
-/** Body signals against your normal, each opening its metric, its off tag in place of its word. [waiting] is what a row with no reading says. */
+/** Body signals against your normal, each opening its metric, its off tag after its line. [waiting] is what a row with no reading says. */
 @Composable
 private fun SignalsList(signals: List<BodySignal>, waiting: String, onOpen: (Metric) -> Unit) {
     ListPanel(title = stringResource(R.string.glow_recovery_body_signals), note = stringResource(R.string.glow_recovery_against_normal)) {
         signals.forEachIndexed { i, s ->
             ListRow(
                 s.label, s.accent, s.value,
+                // The tag already says which way it is off, so the word against your normal gives way to it.
                 when {
                     s.value == null -> waiting
+                    s.line != null -> s.line
                     s.learning != null -> s.learning
+                    s.tag != null -> null
                     else -> TodayCopy.normalWord(s.direction)
                 },
                 tag = s.tag, onClick = { onOpen(s.metric) }, divider = i > 0, icon = s.metric.rowIcon(),

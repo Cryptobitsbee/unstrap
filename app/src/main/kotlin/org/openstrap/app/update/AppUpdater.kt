@@ -20,6 +20,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,14 +57,20 @@ sealed interface Install {
     data class Failed(val tag: String, val failure: InstallFailure, val detail: String? = null) : Install
 }
 
+/** Where reading the release list stands: one value, so "checking" and "failed" can't both be true. */
+sealed interface Check {
+    data object Idle : Check
+    data object Checking : Check
+    /** The last check couldn't reach GitHub or read its reply. */
+    data object Failed : Check
+}
+
 data class UpdateState(
     /** Every release GitHub listed at the last check (kept across restarts), newest first. */
     val releases: List<Release> = emptyList(),
     /** When that check was, epoch seconds. */
     val checkedAt: Long? = null,
-    val checking: Boolean = false,
-    /** The last check couldn't reach GitHub or read its reply. */
-    val checkFailed: Boolean = false,
+    val check: Check = Check.Idle,
     val install: Install = Install.Idle,
 )
 
@@ -110,7 +117,42 @@ class AppUpdater(
     /** Sets the daily check going, or stops it, as the switch says; each app start. */
     fun start() {
         scope.launch { if (settings.updateAuto.first()) schedule(app) else cancel(app) }
+        reconcile()
     }
+
+    /** True from creating the installer session until it is committed, when no session is yet there to find. */
+    @Volatile private var committing = false
+
+    /**
+     * Brings the saved "installing" tag and [Install.Installing] in line with what Android has. Each app start, and when the
+     * Updates page comes back to the front (the user may have walked away from Android's confirm screen):
+     * - the tag is for this version or an older one: the update is in, the tag goes;
+     * - no installer session of ours is open: nothing is installing, so the tag goes and the page is back to Idle;
+     * - a session is open and memory says Idle (the process died after the commit): the page shows Installing again.
+     */
+    fun reconcile() {
+        scope.launch {
+            if (committing) return@launch
+            val tag = (_state.value.install as? Install.Installing)?.tag ?: settings.updateInstalling() ?: return@launch
+            val target = Releases.version(tag)
+            val mine = Releases.version(installed)
+            val inThere = target != null && mine != null && Releases.compare(target, mine) <= 0
+            val live = !inThere && withContext(Dispatchers.IO) { sessionOpen() }
+            if (committing) return@launch
+            when {
+                live -> _state.update { if (it.install is Install.Idle) it.copy(install = Install.Installing(tag)) else it }
+                else -> {
+                    settings.setUpdateInstalling(null)
+                    _state.update { if (it.install is Install.Installing) it.copy(install = Install.Idle) else it }
+                }
+            }
+        }
+    }
+
+    /** An installer session of this app is open: committed or not, Android hasn't finished with it. */
+    private fun sessionOpen(): Boolean = runCatching {
+        app.packageManager.packageInstaller.mySessions.any { it.appPackageName == app.packageName }
+    }.getOrDefault(false)
 
     fun setAuto(on: Boolean) {
         scope.launch {
@@ -125,7 +167,7 @@ class AppUpdater(
 
     /** Reads the release list from GitHub; true when it got one. */
     suspend fun check(): Boolean = checkLock.withLock {
-        _state.update { it.copy(checking = true) }
+        _state.update { it.copy(check = Check.Checking) }
         try {
             catching {
                 val json = get(Releases.API, github = true)
@@ -137,16 +179,16 @@ class AppUpdater(
                 }
                 val now = System.currentTimeMillis() / 1000
                 settings.setUpdateChecked(now)
-                _state.update { it.copy(releases = releases, checkedAt = now, checkFailed = false) }
+                _state.update { it.copy(releases = releases, checkedAt = now, check = Check.Idle) }
                 true
             }.getOrElse { e ->
                 Log.i(TAG, "Update check failed: $e")
-                _state.update { it.copy(checkFailed = true) }
+                _state.update { it.copy(check = Check.Failed) }
                 false
             }
         } finally {
             // Cancelled too: the page doesn't stay on Checking.
-            _state.update { it.copy(checking = false) }
+            _state.update { if (it.check == Check.Checking) it.copy(check = Check.Idle) else it }
         }
     }
 
@@ -179,14 +221,36 @@ class AppUpdater(
                 checkArchive(file)
                 // The download can outlast a workout's start.
                 if (recording()) throw Stop(InstallFailure.Recording)
+                committing = true
                 _state.update { it.copy(install = Install.Installing(tag)) }
                 settings.setUpdateInstalling(tag)
                 commit(file)
+                watchInstalling(tag)
             }.onFailure { e ->
                 val failure = failureFor(e)
                 if (e !is Stop) Log.i(TAG, "Update install failed ($failure): $e")
                 fail(tag, failure, e.message.takeIf { failure == InstallFailure.Android })
             }
+            committing = false
+        }
+    }
+
+    /**
+     * Installing has a way out: when the user ignores Android's confirm screen nothing is ever reported, so after
+     * [INSTALL_TIMEOUT_MS] the open session is abandoned and the page goes back to Idle.
+     */
+    private fun watchInstalling(tag: String) {
+        scope.launch {
+            delay(INSTALL_TIMEOUT_MS)
+            if ((_state.value.install as? Install.Installing)?.tag != tag) return@launch
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val installer = app.packageManager.packageInstaller
+                    installer.mySessions.filter { it.appPackageName == app.packageName }.forEach { installer.abandonSession(it.sessionId) }
+                }
+            }
+            settings.setUpdateInstalling(null)
+            _state.update { if ((it.install as? Install.Installing)?.tag == tag) it.copy(install = Install.Idle) else it }
         }
     }
 
@@ -195,14 +259,16 @@ class AppUpdater(
         _state.update { if (it.install is Install.Failed) it.copy(install = Install.Idle) else it }
     }
 
-    /** What Android's package installer reported ([UpdateReceiver]). */
+    /**
+     * What Android's package installer reported ([UpdateReceiver]). The tag is the one in memory, or the saved one when the
+     * process died after the commit, so a failure then is shown and the saved tag cleared instead of lost.
+     */
     internal fun installResult(context: Context, status: Int, message: String?, confirm: Intent?) {
-        val tag = (_state.value.install as? Install.Installing)?.tag
         when (status) {
             // Android asks the user first: its own confirmation screen.
             PackageInstaller.STATUS_PENDING_USER_ACTION -> confirm?.let {
                 runCatching { context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                    .onFailure { e -> tag?.let { t -> fail(t, InstallFailure.Android, e.message) } }
+                    .onFailure { e -> withTag { t -> fail(t, InstallFailure.Android, e.message) } }
             }
             // On success Android closes the app, so this is rarely seen.
             PackageInstaller.STATUS_SUCCESS -> _state.update { it.copy(install = Install.Idle) }
@@ -217,9 +283,16 @@ class AppUpdater(
                     else -> InstallFailure.Android
                 }
                 Log.i(TAG, "Update install failed: status $status, $message")
-                fail(tag ?: return, failure, message)
+                withTag { t -> fail(t, failure, message) }
             }
         }
+    }
+
+    /** Runs [block] with the tag being installed: from memory, or else the saved one. Nothing when neither is there. */
+    private fun withTag(block: (String) -> Unit) {
+        val tag = (_state.value.install as? Install.Installing)?.tag
+        if (tag != null) return block(tag)
+        scope.launch { settings.updateInstalling()?.let(block) }
     }
 
     private fun fail(tag: String, failure: InstallFailure, detail: String? = null) {
@@ -357,6 +430,9 @@ class AppUpdater(
     companion object {
         private const val TAG = "unstrap"
         private const val DAILY = "update-check"
+
+        /** How long Installing waits for Android's report before the page goes back to Idle. */
+        internal const val INSTALL_TIMEOUT_MS = 10 * 60 * 1000L
 
         /** Starts the daily check; a no-op when it's already scheduled. Runs only with a network. */
         fun schedule(context: Context) {
