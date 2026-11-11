@@ -15,7 +15,9 @@ import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.data.WorkoutAnalysis
 import org.openstrap.app.ui.dashboard.DayUiState
 import org.openstrap.app.ui.dashboard.Detail
+import org.openstrap.app.presentation.DetailCopy
 import org.openstrap.app.presentation.Metric
+import org.openstrap.app.ui.dashboard.LatestReading
 import org.openstrap.app.ui.dashboard.SleepCopy
 import org.openstrap.app.ui.dashboard.avg
 import org.openstrap.app.ui.theme.MetricColors
@@ -97,6 +99,8 @@ fun metricIndex(
     today: LocalDate = LocalDate.now(),
     /** The strap's own Recovery for the day, shown as its estimate while OpenStrap's score is withheld, as on Today. */
     strapScore: Int? = null,
+    /** The time as epoch seconds, which says whether a latest reading is old enough to show when it was taken. */
+    now: Long = java.time.Instant.now().epochSecond,
     strings: Strings = Strings.app,
 ): List<IndexGroup> {
     val rec = recovery?.takeIf { it.date == state.date }
@@ -143,7 +147,7 @@ fun metricIndex(
                 ),
             ),
         ),
-    ) + signalGroups(state, strings) + listOf(
+    ) + signalGroups(state, now, strings) + listOf(
         IndexGroup(
             strings.get(R.string.glow_metrics_group_activity),
             listOf(
@@ -173,11 +177,13 @@ private fun metric(
     value: Float?,
     @StringRes status: Int = R.string.glow_metrics_day_average,
     suffix: String = "",
-) = row(strings.get(name), color, value?.let { m.format(it) + suffix }, strings.get(status), IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS)))
+    /** The status as already worded, for a latest reading whose line depends on its time. */
+    line: String? = null,
+) = row(strings.get(name), color, value?.let { m.format(it) + suffix }, line ?: strings.get(status), IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS)))
 
 /**
- * Skin temperature's row: once there's a normal, the night's change from it with the level in the status line, as the
- * Sleep tab and the detail lead with it; before that, the night's average.
+ * Skin temperature's row: the night's average level, with its change from your normal in the status line once there's
+ * a normal, as the Sleep tab says it; before that, "Average asleep".
  */
 private fun skinTemperatureRow(state: DayUiState, strings: Strings): IndexRow {
     val m = Metric.SkinTemperature
@@ -185,16 +191,16 @@ private fun skinTemperatureRow(state: DayUiState, strings: Strings): IndexRow {
     val normal = SleepCopy.nightNormal(state, m)
     val name = strings.get(R.string.glow_metrics_skin_temperature)
     val target = IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS))
-    return if (v != null && normal != null) {
-        val unitLine = strings.format(R.string.glow_metrics_unit_from_normal, m.unit, m.format(v))
-        row(name, MetricColors.temperature, m.formatChange(v - normal.mean), unitLine, target)
+    val status = if (v != null && normal != null) {
+        DetailCopy.changeWithUnit(m, v - normal.mean)
     } else {
-        row(name, MetricColors.temperature, v?.let { m.format(it) }, strings.get(R.string.glow_metrics_night_average), target)
+        strings.get(R.string.glow_metrics_night_average)
     }
+    return row(name, MetricColors.temperature, v?.let { m.format(it) }, status, target)
 }
 
 /** The index's Heart and Body signals groups, a row for each of their metrics. */
-private fun signalGroups(state: DayUiState, strings: Strings): List<IndexGroup> = listOf(
+private fun signalGroups(state: DayUiState, now: Long, strings: Strings): List<IndexGroup> = listOf(
     IndexGroup(
         strings.get(R.string.glow_metrics_group_heart),
         listOf(
@@ -216,17 +222,23 @@ private fun signalGroups(state: DayUiState, strings: Strings): List<IndexGroup> 
     IndexGroup(
         strings.get(R.string.glow_metrics_group_body),
         listOf(
-            // Night signals: last night's, as every tab and detail shows them (SleepCopy.NIGHT_SIGNALS).
+            // Blood oxygen leads with the day's latest reading, as heart rate does, and opens the day's detail. The line says
+            // whether it was taken awake or asleep, and when once it is an hour old.
             metric(
-                strings, Metric.Spo2, R.string.glow_metrics_blood_oxygen, MetricColors.spo2, SleepCopy.nightValue(state, Metric.Spo2),
-                R.string.glow_metrics_night_average, suffix = "%",
+                strings, Metric.Spo2, R.string.glow_metrics_blood_oxygen, MetricColors.spo2, LatestReading.spo2(state)?.y,
+                suffix = "%", line = latestLine(Metric.Spo2, state, now, strings, time = ::clock),
             ),
+            // Night signals: last night's, as every tab and detail shows them (SleepCopy.NIGHT_SIGNALS).
             skinTemperatureRow(state, strings),
             metric(
                 strings, Metric.Breathing, R.string.glow_metrics_breathing_rate, MetricColors.sleepLight,
                 SleepCopy.nightValue(state, Metric.Breathing), R.string.glow_metrics_night_average,
             ),
-            metric(strings, Metric.Stress, R.string.glow_metrics_stress, MetricColors.stress, state.stress.avg()?.toFloat()),
+            // The latest reading, as on Today; its High tag and rim are on the Today and Recovery cards, so the line says the level.
+            metric(
+                strings, Metric.Stress, R.string.glow_metrics_stress, MetricColors.stress, LatestReading.stress(state)?.y,
+                line = latestLine(Metric.Stress, state, now, strings, time = ::clock),
+            ),
         ),
     ),
 )

@@ -41,6 +41,12 @@
     <string name="core_detail_label_breathing">br/min，睡眠期间</string>
     <string name="core_detail_label_day_average">全天平均</string>
     <string name="core_detail_label_unit_day_average">%1$s，全天平均</string>
+    <string name="core_detail_label_stress_latest_at">%1$s，最新于 %2$s</string>
+    <string name="core_detail_skin_above">%1$s，高于你的常态</string>
+    <string name="core_detail_skin_below">%1$s，低于你的常态</string>
+    <string name="core_detail_skin_within">%1$s，符合你的常态</string>
+    <string name="core_detail_label_unit_daytime_latest_at">%1$s，白天，最新于 %2$s</string>
+    <string name="core_detail_label_unit_asleep_latest_at">%1$s，睡眠中，最新于 %2$s</string>
     <string name="core_detail_label_steps_week">每日步数，最近 7 天</string>
     <string name="core_detail_label_steps_month">每日步数，最近 30 天</string>
     <string name="core_detail_label_steps_year">每日步数，最近 12 个月</string>

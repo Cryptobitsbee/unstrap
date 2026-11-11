@@ -22,6 +22,25 @@ internal object DetailCopy {
         else -> strings.get(R.string.core_detail_status_usual)
     }
 
+    /**
+     * How far a skin temperature is from your normal, signed and with its unit, on the cards and rows that have room for
+     * no more: "+0.3 °C", "\u22120.2 °C". [change] is the level minus your normal's mean; none reads "+0.0 °C".
+     */
+    fun changeWithUnit(metric: Metric, change: Float): String = "${metric.formatChange(change)} ${metric.unit}"
+
+    /**
+     * The status line under a skin temperature's level on a day's detail: its signed [change] from your normal with the
+     * unit, then which side of it [status] (History.status's 1, -1 or 0) puts it on: "-0.7 °C, below your normal".
+     */
+    fun skinChangeWord(metric: Metric, change: Float, status: Int, strings: Strings = Strings.app): String = strings.format(
+        when (status) {
+            1 -> R.string.core_detail_skin_above
+            -1 -> R.string.core_detail_skin_below
+            else -> R.string.core_detail_skin_within
+        },
+        changeWithUnit(metric, change),
+    )
+
     /** Where a chart's point sits against your normal: inside it stays dim, above or below it gets the full colour. */
     enum class Level { Inside, Above, Below }
 
@@ -87,12 +106,32 @@ internal object DetailCopy {
         strings.plural(if (nightly) R.plurals.core_detail_nights else R.plurals.core_detail_days, n, numberWord(n, strings))
 
     /**
+     * The day's latest reading of blood oxygen or stress: the clock time [at] it was taken, for blood oxygen whether it was
+     * taken [asleep] (in the sleep window), for stress its [level].
+     */
+    data class Latest(val at: String, val asleep: Boolean = false, val level: StressLevel? = null)
+
+    /**
+     * "%, daytime, latest at 14:05" or "%, while asleep, latest at 05:10", or "High, latest at 14:05" for a metric with
+     * no [unit] (stress, whose level leads); null without a [latest], or a level for a metric with no unit.
+     */
+    private fun latestLabel(unit: String, latest: Latest?, strings: Strings): String? = when {
+        latest == null -> null
+        unit.isEmpty() -> latest.level?.let { strings.format(R.string.core_detail_label_stress_latest_at, it.word(strings), latest.at) }
+        else -> strings.format(
+            if (latest.asleep) R.string.core_detail_label_unit_asleep_latest_at else R.string.core_detail_label_unit_daytime_latest_at,
+            unit, latest.at,
+        )
+    }
+
+    /**
      * The label under the value: what the number is for the range. "bpm now", "ms, day average", "steps, average of
-     * the last 7 days". [live] is heart rate read live this minute, [estimated] a resting heart rate unstrap worked out itself.
+     * the last 7 days". [live] is heart rate read live this minute, [estimated] a resting heart rate unstrap worked out itself,
+     * [latest] the day's latest reading of blood oxygen or stress, which their day says instead of an average.
      */
     fun valueLabel(
         metric: Metric, range: Range, live: Boolean = false, today: Boolean = true, estimated: Boolean = false,
-        strings: Strings = Strings.app,
+        latest: Latest? = null, strings: Strings = Strings.app,
     ): String {
         val unit = metric.unit
         // One string with the unit and one without, so a translator writes the capital rather than the code adding it.
@@ -105,6 +144,9 @@ internal object DetailCopy {
                 )
                 Metric.Steps -> strings.get(if (today) R.string.core_detail_label_steps_today else R.string.core_detail_label_steps)
                 Metric.Breathing -> strings.get(R.string.core_detail_label_breathing)
+                // Blood oxygen's and stress's day is their latest reading, with the time it was taken ([latest]).
+                Metric.Spo2, Metric.Stress -> latestLabel(unit, latest, strings)
+                    ?: with(R.string.core_detail_label_day_average, R.string.core_detail_label_unit_day_average)
                 else -> with(R.string.core_detail_label_day_average, R.string.core_detail_label_unit_day_average)
             }
             Range.Week -> if (metric == Metric.Steps) strings.get(R.string.core_detail_label_steps_week)

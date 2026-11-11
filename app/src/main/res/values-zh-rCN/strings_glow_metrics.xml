@@ -46,7 +46,6 @@
     <string name="glow_metrics_unit_day">%1$s，%2$s</string>
     <string name="glow_metrics_unit_average_from_time">%1$s，%3$s 起 %2$d 分钟平均</string>
     <string name="glow_metrics_average_from_time">%2$s 起 %1$d 分钟平均</string>
-    <string name="glow_metrics_unit_from_normal">%1$s，相对你的常态，当前 %2$s %1$s</string>
     <string name="glow_metrics_steps_hours">步，%1$s</string>
     <string name="glow_metrics_week_of">%1$s 当周</string>
     <string name="glow_metrics_related">相关指标</string>

@@ -21,7 +21,7 @@ class AllMetricsTest {
 
     private val empty = DayUiState()
 
-    /** A metric's detail as the index opens it: a night signal's scoped to the night. */
+    /** A metric's detail as the index opens it: a night signal's scoped to the night, blood oxygen's to the day. */
     private fun open(m: Metric) = IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS))
 
     @Test fun `every metric detail appears exactly once`() {
@@ -47,21 +47,31 @@ class AllMetricsTest {
         assertEquals(NO_VALUE, hrv.status)
     }
 
-    @Test fun `values are the day's, night signals last night's, in the metric's format`() {
+    @Test fun `values are the day's, night signals last night's, blood oxygen's latest reading, in the metric's format`() {
         val sleep = SleepSession(start = 0, end = 8 * 3600)
         val day = empty.copy(
             steps = 13860, latestHeartRate = 58,
-            // The calendar day's readings differ from the night's: the index shows the night's, as every tab does.
+            // Blood oxygen is the day's latest reading, the other signals the night's, as every tab does.
             spo2 = listOf(ChartPoint(0, 90f), ChartPoint(60, 92f)),
             skinTemperature = listOf(ChartPoint(0, 31.4f), ChartPoint(60, 31.6f)),
             sleep = sleep,
             nights = listOf(SleepNight(empty.date, sleep, spo2 = 97f, skinTemperature = 36.5f)),
         )
-        val rows = metricIndex(day, null, null, emptyList()).flatMap { it.rows }.associateBy { it.target }
+        val rows = metricIndex(day, null, null, emptyList(), now = 120).flatMap { it.rows }.associateBy { it.target }
         assertEquals("13,860", rows.getValue(IndexTarget.Open(Detail.OfMetric(Metric.Steps))).value)
         assertEquals("58", rows.getValue(IndexTarget.Open(Detail.OfMetric(Metric.HeartRate))).value)
-        assertEquals("97%", rows.getValue(open(Metric.Spo2)).value)
+        assertEquals("92%", rows.getValue(open(Metric.Spo2)).value)
+        // Taken inside the night's sleep window a minute ago: no time yet.
+        assertEquals("While asleep", rows.getValue(open(Metric.Spo2)).status)
+        assertEquals(IndexTarget.Open(Detail.OfMetric(Metric.Spo2, night = false)), rows.getValue(open(Metric.Spo2)).target)
         assertEquals("36.5", rows.getValue(open(Metric.SkinTemperature)).value)
+    }
+
+    @Test fun `blood oxygen's row says daytime without a sleep window, and the time once the reading is old`() {
+        val day = empty.copy(spo2 = listOf(ChartPoint(60, 92f)))
+        fun status(now: Long) = metricIndex(day, null, null, emptyList(), now = now).flatMap { it.rows }.first { it.name == "Blood oxygen" }.status
+        assertEquals("Daytime", status(120))
+        assertTrue(status(120 + 2 * 3600), status(120 + 2 * 3600).startsWith("Daytime, "))
     }
 
     @Test fun `a resting heart rate unstrap estimated says so`() {
@@ -71,18 +81,33 @@ class AllMetricsTest {
         assertEquals("For the day, estimated", status(true))
     }
 
-    @Test fun `skin temperature leads with its change from your normal once there is one, the level under it`() {
+    @Test fun `stress is the day's latest reading, not its average`() {
+        val day = empty.copy(stress = listOf(ChartPoint(0, 80f), ChartPoint(60, 30f), ChartPoint(120, 40f)))
+        val row = metricIndex(day, null, null, emptyList(), now = 180).flatMap { it.rows }.first { it.name == "Stress" }
+        assertEquals("40", row.value)
+        // The row has no tag, so its line says the level of the reading.
+        assertEquals("Normal", row.status)
+        // An hour on, the row says when.
+        val old = metricIndex(day, null, null, emptyList(), now = 120 + 2 * 3600).flatMap { it.rows }.first { it.name == "Stress" }
+        assertTrue(old.status, old.status.startsWith("Normal, "))
+        val high = metricIndex(day.copy(stress = listOf(ChartPoint(0, 85f))), null, null, emptyList(), now = 60).flatMap { it.rows }.first { it.name == "Stress" }
+        assertEquals("High", high.status)
+        assertEquals(IndexTarget.Open(Detail.OfMetric(Metric.Stress)), row.target)
+    }
+
+    @Test fun `skin temperature leads with its level, its change from your normal under it once there is one`() {
         val sleep = SleepSession(start = 0, end = 8 * 3600)
         // Eight nights at 35.9 and 36.1 by turns: a normal of 36.0.
         val before = (1L..8L).map { SleepNight(empty.date.minusDays(it), SleepSession(0, 1), skinTemperature = if (it % 2 == 0L) 35.9f else 36.1f) }
         fun row(nights: List<SleepNight>) = metricIndex(
             empty.copy(sleep = sleep, nights = nights + SleepNight(empty.date, sleep, skinTemperature = 36.5f)), null, null, emptyList(),
         ).flatMap { it.rows }.first { it.target == open(Metric.SkinTemperature) }
-        // Before there's a normal, the absolute figure.
+        // Before there's a normal, the night's average says so.
         assertEquals("36.5", row(emptyList()).value)
+        assertEquals("Average asleep", row(emptyList()).status)
         val led = row(before)
-        assertEquals("+0.5", led.value)
-        assertEquals("°C from your normal, at 36.5 °C", led.status)
+        assertEquals("36.5", led.value)
+        assertEquals("+0.5 °C", led.status)
     }
 
     private fun readiness(score: Int?, nights: Int, withheld: Boolean = false) =

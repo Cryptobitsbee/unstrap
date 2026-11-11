@@ -40,17 +40,17 @@
     <string name="day_info_hrv_off">测量期间身体活动、手环佩戴偏松或睡眠时间过短都会减少有效读数。HRV 每天的波动很大，因此连续数天的走势比单日读数更具参考意义。</string>
     <string name="day_info_spo2_name">血氧</string>
     <string name="day_info_spo2_meaning">你的血液携氧能力占比。大多数人的血氧处于 95 到 100%% 之间。</string>
-    <string name="day_info_spo2_how">手环通过红光和红外光穿透皮肤，并对比两种光线的反射量。当日数值为所有测量读数的平均值。</string>
+    <string name="day_info_spo2_how">手环通过红光和红外光穿透皮肤，并对比两种光线的反射量。手环白天和夜间都会测量，显示的数值是最近一次读数。睡眠页和恢复页显示的是睡眠期间的平均值。</string>
     <string name="day_info_spo2_moves">高海拔环境以及睡眠中的呼吸暂停可能会使它降低。</string>
     <string name="day_info_spo2_off">手环佩戴偏松、皮肤冰凉或测量时身体活动都可能导致读数偏低。此读数仅供健康参考，不作为医疗依据。</string>
     <string name="day_info_stress_name">压力</string>
     <string name="day_info_stress_meaning">手环测得的压力水平，范围从 0 到 100。数值越高，表明身体处于更高的警觉状态。</string>
-    <string name="day_info_stress_how">手环会在你静止时根据心率及其变异性计算该数值。运动期间及刚结束后的读数会被排除在外，因为运动并不等同于压力。</string>
+    <string name="day_info_stress_how">手环会在你静止时根据心率及其变异性计算该数值。显示的数值是最近一次读数，与你的常态比较的是全天平均值。运动期间及刚结束后的读数会被排除在外，因为运动并不等同于压力。</string>
     <string name="day_info_stress_moves">精神压力、咖啡因和睡眠不足会使它上升；平缓呼吸、充分休息和户外活动能让它降下来。</string>
     <string name="day_info_stress_off">情绪激动、燥热环境以及生病在手环看来都类似压力；久坐时的微小动作也可能推高读数。</string>
     <string name="day_info_skin_temp_name">皮肤温度</string>
-    <string name="day_info_skin_temp_meaning">手环下方皮肤的温度。重要的不是绝对数值，而是相对于你常态的变化。</string>
-    <string name="day_info_skin_temp_how">手环紧贴皮肤进行测量。绝对温度受佩戴松紧和室温影响，因此 unstrap 会将其显示为相对于过去 30 天常态的变化量。</string>
+    <string name="day_info_skin_temp_meaning">手环下方皮肤的温度。更值得关注的是相对于你常态的变化，而不是数值本身。</string>
+    <string name="day_info_skin_temp_how">手环紧贴皮肤进行测量。显示的数值是整个睡眠期间的平均值。绝对温度受佩戴松紧和室温影响，因此 unstrap 会同时显示相对于过去 30 天常态的变化量。</string>
     <string name="day_info_skin_temp_moves">它会随饮酒、室内偏暖、高强度训练、生理周期或身体抵抗不适而产生波动。</string>
     <string name="day_info_skin_temp_off">温暖的被窝、厚重的被子或手环佩戴偏松，都可能在身体本身并无变化的情况下改变读数。</string>
     <string name="day_info_breathing_name">呼吸频率</string>
@@ -128,7 +128,7 @@
         <item quantity="other">有 %1$d 分钟来自心率测量而非步数。</item>
     </plurals>
     <string name="day_info_night_heart_rate">从夜间睡眠中打开时，仅显示你的睡眠数据：从入睡到醒来的心率曲线、睡眠中的最低心率以及手环记录的整夜平均值。“月”与“年”视图则为全天完整数据。</string>
-    <string name="day_info_night_spo2">从夜间睡眠中打开时，显示手环在睡眠期间的读数（与白天的单次测量分开记录），并与你之前的夜间数据进行对比。</string>
+    <string name="day_info_night_spo2">从夜间睡眠中打开时，显示手环在睡眠期间的读数（与白天的读数分开记录），并与你之前的夜间数据进行对比。</string>
     <string name="day_info_night_breathing">从夜间睡眠中打开时，显示当晚的读数，并与你之前的夜间数据进行对比。</string>
     <string name="day_info_night_other">从夜间睡眠中打开时，显示你睡眠期间测量读数的平均值，并与你之前的夜间数据进行对比。“月”与“年”视图则为昼夜全天的完整数据。</string>
     <string name="day_info_disturbances_name">呼吸紊乱</string>

@@ -64,11 +64,16 @@ internal object SleepCopy {
     fun averageHeart(state: DayUiState): Int? = state.sleep?.averageHeartRate ?: HeartReadings.mean(sleepMinutes(state))
 
     /**
-     * The signals the strap reads in your sleep. Wherever one shows, on any tab, in its detail or a related row, it's
+     * The signals the strap reads only in your sleep. Wherever one shows, on any tab, in its detail or a related row, it's
      * the night's average ([nightValue]) against the nights before ([nightNormal]), so they all say the same. The
      * calendar day would split the night at midnight and judge it against whole days, hours off the wrist included.
+     * Blood oxygen is not one: the strap reads it all day too, so only the Sleep and Recovery tabs show its night
+     * ([NIGHT_FIGURES]), and Today and All metrics lead with its latest reading ([LatestReading]).
      */
-    val NIGHT_SIGNALS: Set<Metric> = setOf(Metric.Hrv, Metric.Breathing, Metric.Spo2, Metric.SkinTemperature)
+    val NIGHT_SIGNALS: Set<Metric> = setOf(Metric.Hrv, Metric.Breathing, Metric.SkinTemperature)
+
+    /** The metrics whose figure on the Sleep and Recovery tabs is the night's, so their details open scoped to the night. */
+    val NIGHT_FIGURES: Set<Metric> = NIGHT_SIGNALS + Metric.Spo2
 
     /**
      * What a night signal says while its normal is still forming: "Learning, 5 of 7 nights". The same words on every

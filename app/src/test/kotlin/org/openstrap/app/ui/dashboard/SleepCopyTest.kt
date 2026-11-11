@@ -98,6 +98,26 @@ class SleepCopyTest {
         assertNull(SleepCopy.nightNormal(s, Metric.HeartRate))
     }
 
+    @Test fun `skin temperature's row is the night's level, its change from your normal under it once there is one`() {
+        fun row(nights: Int): NightVital {
+            // Nights at 35.9 and 36.1 by turns (a normal of 36.0), then tonight at 36.5.
+            val before = (nights.toLong() downTo 1L).map { back ->
+                SleepNight(date.minusDays(back), session, skinTemperature = if (back % 2 == 0L) 35.9f else 36.1f)
+            }
+            return nightVitals(DayUiState(date = date, sleep = session, nights = before + SleepNight(date, session, skinTemperature = 36.5f)))
+                .first { it.metric == Metric.SkinTemperature }
+        }
+        val formed = row(8)
+        assertEquals("36.5", formed.value)
+        assertEquals("+0.5 \u00B0C", formed.status)
+        assertEquals(1, formed.direction)
+        // While the normal forms, the level and how far along it is.
+        val forming = row(3)
+        assertEquals("36.5", forming.value)
+        assertTrue(forming.status, forming.status.startsWith("Learning"))
+        assertNull(forming.direction)
+    }
+
     @Test fun `the night's week ends on the night shown, with the same value as its Day`() {
         val week = SleepCopy.nightWeek(state(), Metric.Hrv)
         assertEquals(7, week.size)
@@ -111,6 +131,8 @@ class SleepCopyTest {
         assertEquals("Lowest 48 bpm at 03:00 last night, 55 on average while asleep.", SleepCopy.nightHeart(48, "03:00", 55, today = true))
         assertEquals("55 bpm on average while asleep that night.", SleepCopy.nightHeart(null, null, 55, today = false))
         assertEquals("ms, average asleep", SleepCopy.nightLabel(Metric.Hrv, Range.Day))
+        // Skin temperature's label no longer carries its change from your normal (DetailCopy.skinChangeWord says it).
+        assertEquals("°C, average asleep", SleepCopy.nightLabel(Metric.SkinTemperature, Range.Day))
         assertEquals("ms, average of the last 7 nights", SleepCopy.nightLabel(Metric.Hrv, Range.Week))
         // Month and Year say when their days aren't only nights.
         assertEquals("ms, last 30 nights", SleepCopy.nightLabel(Metric.Hrv, Range.Month))
@@ -118,6 +140,25 @@ class SleepCopyTest {
         assertEquals("%, last 30 nights", SleepCopy.nightLabel(Metric.Spo2, Range.Month))
         assertEquals("No sleep" to "None recorded last night", SleepCopy.nightNoValue(hasSleep = false, today = true))
         assertEquals("No reading" to "Not measured that night", SleepCopy.nightNoValue(hasSleep = true, today = false))
+    }
+
+    @Test fun `blood oxygen is the night's on the Sleep and Recovery tabs only, the day's latest reading elsewhere`() {
+        assertFalse(Metric.Spo2 in SleepCopy.NIGHT_SIGNALS)
+        assertTrue(Metric.Spo2 in SleepCopy.NIGHT_FIGURES)
+        // The other night signals are forced to the night wherever they open.
+        assertTrue(SleepCopy.NIGHT_SIGNALS.containsAll(listOf(Metric.Hrv, Metric.Breathing, Metric.SkinTemperature)))
+        assertTrue(SleepCopy.NIGHT_FIGURES.containsAll(SleepCopy.NIGHT_SIGNALS))
+        assertFalse(Metric.RestingHr in SleepCopy.NIGHT_FIGURES)
+        // The night's average stays what the Sleep tab reads, whatever the day's readings are.
+        val s = state().copy(spo2 = listOf(ChartPoint(midnight + 14 * 3600, 91f)))
+        assertEquals(94f, SleepCopy.nightValue(s, Metric.Spo2))
+        assertEquals(91f, LatestReading.spo2(s)?.y)
+    }
+
+    @Test fun `blood oxygen's row on the Sleep tab says it is the night average, tag or not`() {
+        val row = nightVitals(state()).first { it.metric == Metric.Spo2 }
+        assertEquals("94%", row.value)
+        assertEquals("Night average", row.status)
     }
 
     @Test fun `night blood oxygen draws on its own table`() {

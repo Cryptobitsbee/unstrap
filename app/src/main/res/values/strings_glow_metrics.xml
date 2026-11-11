@@ -95,8 +95,6 @@
     <string name="glow_metrics_unit_average_from_time"><xliff:g id="unit" example="bpm">%1$s</xliff:g>, <xliff:g id="minutes" example="5">%2$d</xliff:g> min average from <xliff:g id="time" example="22:30">%3$s</xliff:g></string>
     <!-- The same for a metric that has no unit. -->
     <string name="glow_metrics_average_from_time"><xliff:g id="minutes" example="15">%1$d</xliff:g> min average from <xliff:g id="time" example="22:30">%2$s</xliff:g></string>
-    <!-- Beside skin temperature's change from your normal: the unit, then the level itself. -->
-    <string name="glow_metrics_unit_from_normal"><xliff:g id="unit" example="°C">%1$s</xliff:g> from your normal, at <xliff:g id="level" example="36.4">%2$s</xliff:g> <xliff:g id="unit_again" example="°C">%1$s</xliff:g></string>
     <!-- Beside a held hour's steps: the hour. -->
     <string name="glow_metrics_steps_hours">steps, <xliff:g id="hours" example="09:00 to 10:00">%1$s</xliff:g></string>
     <!-- The held point on a year's chart is a week: when it starts. The date is "21 Oct". -->

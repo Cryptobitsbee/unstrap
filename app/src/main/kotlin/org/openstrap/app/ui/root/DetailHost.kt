@@ -68,7 +68,8 @@ internal fun DetailHost(
     val workouts by workoutsVm.workouts.collectAsStateWithLifecycle()
     val activity by dayVm.activityHistory.collectAsStateWithLifecycle()
     when (detail) {
-        // A night signal's detail is always the night's, as its rows read it (SleepCopy.NIGHT_SIGNALS).
+        // A night signal's detail is always the night's, as its rows read it (SleepCopy.NIGHT_SIGNALS). Blood oxygen's
+        // is the night's only when the Sleep or Recovery tab opened it, so it comes with its own scope.
         is Detail.OfMetric -> GlowMetricDetailScreen(
             detail.metric, detail.night || detail.metric in SleepCopy.NIGHT_SIGNALS, day, histories.daily, live.bpm, live.canUse,
             push, onSwitch, dayVm::select, padding, pop,
@@ -105,9 +106,9 @@ internal fun DetailHost(
         Detail.Recovery -> {
             BackHandler(onBack = pop)
             GlowRecoveryScreen(
-                day, shown.recovery, histories.daily,
+                day, shown.recovery,
                 header = { PageHeader(stringResource(R.string.day_tab_recovery), pop, subtitle = dayName(day.date)) },
-                contentPadding = padding, onOpenMetric = { push(Detail.OfMetric(it)) },
+                contentPadding = padding, onOpenMetric = { push(Detail.OfMetric(it, night = it in SleepCopy.NIGHT_FIGURES)) },
                 onOpenScore = { push(Detail.OfScore(it)) }, strapScore = shown.strapScore,
                 healthspan = shown.healthspan, onOpenHealthspan = { seeHabitAge(); push(Detail.Healthspan) }, onOpenProfile = onOpenProfile,
                 recoveryFailure = shown.recoveryFailure, onRetryRecovery = dayVm::retryRecovery,

@@ -7,6 +7,7 @@ import androidx.compose.ui.res.pluralStringResource
 import org.openstrap.app.i18n.Strings
 import org.openstrap.app.presentation.DayWords
 import org.openstrap.app.presentation.Ranges
+import org.openstrap.app.presentation.StressLevel
 import org.openstrap.app.presentation.Units
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -497,28 +498,22 @@ internal fun HeartCard(
 
 /**
  * Heart rate on Today (spec 4.2): the day's line through your resting range ([restingRange], your normal resting
- * heart rate) as a dim band, the latest reading or the [live] one in dots. Off your [normal] heart rate for a day, the
- * day so far running high or low, the card rims at the line's end and says Above or Below normal. One high reading
- * isn't news, a day running high is. No scrub here: that lives on Activity's Wide and in the detail.
+ * heart rate) as a dim band, the latest reading or the [live] one in dots. A reading moves all day, so the card has no
+ * tag and no rim; resting heart rate carries its own. No scrub here: that lives on Activity's Wide and in the detail.
  */
 @Composable
 internal fun HeartDayCard(
     state: DayUiState, live: Int?, size: PictureSize, onClick: () -> Unit, modifier: Modifier = Modifier,
-    restingRange: org.openstrap.app.data.History.Normal? = null, normal: org.openstrap.app.data.History.Normal? = null,
-    upTo: String? = null,
+    restingRange: org.openstrap.app.data.History.Normal? = null, upTo: String? = null,
 ) {
     val values = remember(state.heartRate, state.dayStart, state.dayEnd) { bucket(state.heartRate, state.dayStart..state.dayEnd, HEART_STEP) }
-    val mean = remember(values) { values.filterNotNull().takeIf { it.isNotEmpty() }?.average()?.toFloat() }
     val now = live ?: state.latestHeartRate
-    val off = bodyOffStatus(mean, normal)
     val at = TodayCopy.heartAt(live != null, state.heartRate.lastOrNull()?.x?.let(::clock))
     TodayPictureCard(
         MetricColors.heart, stringResource(R.string.glow_today_heart_rate), size, now?.toString(), stringResource(R.string.glow_unit_bpm),
-        offTag(OffWords.Normal, off),
-        // A Small says where the day sits against your normal once there is one, a Wide when the reading was taken.
-        if (size == PictureSize.Small && normal != null && mean != null && !off.off) TodayCopy.normalWord(0) else at,
+        // The "Up to" marker already says when the line ends.
+        null, at.takeIf { upTo == null },
         modifier, note = restingNote(state),
-        rim = if (rimLit(OffWords.Normal, off)) dayLineRim(values, off == OffStatus.Above, size) else null,
         onClick = onClick, marker = upTo,
         picture = if (state.heartRate.size < 2) null else { m -> DayLine(values, restingRange?.let { it.low..it.high }, MetricColors.heart, size, m) },
     )
@@ -537,26 +532,26 @@ private const val SECONDS_PER_MINUTE = 60L
 
 /**
  * Stress on Today (spec 4.2): the day as one strip, calm to high ([DayStrip], [DayUiState.stressStrip]), the latest
- * reading in dots. The day so far against your [normal] stress says Above or Below usual, with the rim over the
- * stretch that's off.
+ * reading in dots with its level under it ([StressLevel]). Only a High latest reading tags the card "High", with the
+ * rim over the strip's latest stretch; the other levels carry neither.
  */
 @Composable
 internal fun StressDayCard(
-    state: DayUiState, size: PictureSize, normal: org.openstrap.app.data.History.Normal?, waiting: String, onClick: () -> Unit,
-    modifier: Modifier = Modifier, upTo: String? = null,
+    state: DayUiState, size: PictureSize, waiting: String, onClick: () -> Unit,
+    modifier: Modifier = Modifier, now: Long = java.time.Instant.now().epochSecond,
 ) {
-    val off = org.openstrap.app.ui.dashboard.stressOffStatus(state.stress, normal)
     val levels = state.stressStrip
-    val now = state.stress.lastOrNull()
+    val latest = org.openstrap.app.ui.dashboard.LatestReading.stress(state)
+    val tag = latest?.let { org.openstrap.app.ui.dashboard.LatestReading.stressTag(StressLevel.of(it.y)) }
     TodayPictureCard(
-        MetricColors.stress, stringResource(R.string.glow_today_stress), size, now?.y?.roundToInt()?.toString(), null,
-        offTag(OffWords.Usual, off),
+        MetricColors.stress, stringResource(R.string.glow_today_stress), size, latest?.y?.roundToInt()?.toString(), null,
+        tag,
         when {
-            now == null -> waiting
-            // The number is the latest reading, whenever it was taken (the other screens give the day's average).
-            else -> stringResource(R.string.glow_today_stress_latest, clock(now.x))
+            latest == null -> waiting
+            // The number is the latest reading, whenever it was taken: its level, with the time once it is an hour old.
+            else -> org.openstrap.app.ui.dashboard.LatestReading.stressLine(latest.x, latest.y, now, tagged = tag != null, time = ::clock)
         },
-        modifier, rim = if (rimLit(OffWords.Usual, off)) dayStripRim(levels, size) else null, onClick = onClick, marker = upTo,
+        modifier, rim = if (tag != null) dayStripRim(levels, size) else null, onClick = onClick,
         picture = if (levels.none { it != null }) null else { m -> DayStrip(levels, MetricColors.stress, size, m) },
     )
 }
@@ -877,9 +872,24 @@ internal class BodyRow(
     val name: String, val color: Color, val value: Float?, val normal: org.openstrap.app.data.History.Normal?, val unit: String, val metric: Metric,
     /** What the row says while its normal is forming, "Learning, 5 of 7 nights"; null for the plain word. */
     val learning: String? = null,
-    /** True when [value] is unstrap's own estimate, which the row says. */
-    val estimated: Boolean = false,
+    /** Where [value] comes from, when it isn't a plain figure read against [normal]. */
+    val source: BodyValue = BodyValue.Plain,
 )
+
+/** What a [BodyRow]'s value is. */
+internal sealed interface BodyValue {
+    /** The day's figure, read against your normal. */
+    data object Plain : BodyValue
+
+    /** unstrap's own estimate, which the row says. */
+    data object Estimated : BodyValue
+
+    /**
+     * The day's latest reading: the row says [line] (when it was taken, awake or asleep) instead of a word against your
+     * normal, and it has no tag or direction, since a single reading has no baseline of its own.
+     */
+    data class Latest(val line: String) : BodyValue
+}
 
 /**
  * Body values against your normal, each opening its metric, read and rounded as the Recovery tab's body signals are.
@@ -891,16 +901,23 @@ internal fun BodyList(
 ) {
     ListPanel(modifier, title = title, note = stringResource(R.string.glow_today_against_normal), marker = upTo) {
         rows.forEachIndexed { i, r ->
-            val direction = org.openstrap.app.data.History.status(r.value, r.normal)
+            val source = r.source
+            val direction = if (source is BodyValue.Latest) null else org.openstrap.app.data.History.status(r.value, r.normal)
+            val tag = org.openstrap.app.ui.dashboard.bodyTag(r.metric, direction)
             ListRow(
                 r.name, r.color, r.value?.let { r.metric.format(it) + r.unit },
+                // The tag already says which way it is off, so the word against your normal gives way to it.
                 when {
                     r.value == null -> waiting
+                    source is BodyValue.Latest -> source.line
                     r.normal == null && r.learning != null -> r.learning
-                    r.estimated -> stringResource(R.string.glow_today_body_estimated, TodayCopy.normalWord(direction))
+                    source == BodyValue.Estimated ->
+                        if (tag != null) stringResource(R.string.glow_today_estimated)
+                        else stringResource(R.string.glow_today_body_estimated, TodayCopy.normalWord(direction))
+                    tag != null -> null
                     else -> TodayCopy.normalWord(direction)
                 },
-                tag = org.openstrap.app.ui.dashboard.bodyTag(r.metric, direction), onClick = { onOpenMetric(r.metric) }, divider = i > 0,
+                tag = tag, onClick = { onOpenMetric(r.metric) }, divider = i > 0,
                 icon = r.metric.rowIcon(),
             )
         }

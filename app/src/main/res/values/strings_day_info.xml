@@ -71,21 +71,21 @@
     <!-- Blood oxygen's sheet. -->
     <string name="day_info_spo2_name">Blood oxygen</string>
     <string name="day_info_spo2_meaning">How much of your blood\'s capacity is carrying oxygen. Most people sit at 95 to 100%%.</string>
-    <string name="day_info_spo2_how">The strap shines red and infrared light through the skin and compares how much of each comes back. The day\'s value is the average of its readings.</string>
+    <string name="day_info_spo2_how">The strap shines red and infrared light through the skin and compares how much of each comes back. It reads through the day and night, and the number is the latest reading. The Sleep and Recovery tabs show the average while you slept.</string>
     <string name="day_info_spo2_moves">Altitude and pauses in breathing during sleep can lower it.</string>
     <string name="day_info_spo2_off">A loose strap, cold skin or moving during a reading can give low values. It\'s a wellness reading, not a medical one.</string>
 
     <!-- Stress's sheet. -->
     <string name="day_info_stress_name">Stress</string>
     <string name="day_info_stress_meaning">The strap\'s stress level from 0 to 100. Higher means your body is more on alert.</string>
-    <string name="day_info_stress_how">The strap calculates it from your heart rate and its variability while you\'re still. Readings during and just after a workout are left out, since exercise isn\'t stress.</string>
+    <string name="day_info_stress_how">The strap calculates it from your heart rate and its variability while you\'re still. The number is the latest reading, and the day\'s average is what is compared with your usual. Readings during and just after a workout are left out, since exercise isn\'t stress.</string>
     <string name="day_info_stress_moves">Pressure, caffeine and too little sleep raise it. Calm breathing, rest and time outdoors bring it down.</string>
     <string name="day_info_stress_off">Excitement, heat and an illness look like stress to the strap. Small movements while sitting can push it up.</string>
 
     <!-- Skin temperature's sheet. -->
     <string name="day_info_skin_temp_name">Skin temperature</string>
-    <string name="day_info_skin_temp_meaning">The temperature of your skin under the strap. What matters is the change from your normal, not the level.</string>
-    <string name="day_info_skin_temp_how">The strap measures it against your skin. The level depends on fit and the room, so unstrap shows it as a change from your normal of the last 30 days.</string>
+    <string name="day_info_skin_temp_meaning">The temperature of your skin under the strap. What to watch is the change from your normal, more than the level.</string>
+    <string name="day_info_skin_temp_how">The strap measures it against your skin. The number is the average through your sleep. The level depends on fit and the room, so unstrap shows the change from your normal of the last 30 days with it.</string>
     <string name="day_info_skin_temp_moves">It moves with alcohol, a warm room, hard training, the menstrual cycle, or when your body is fighting something off.</string>
     <string name="day_info_skin_temp_off">A warm bed, a heavy duvet or the strap sitting loose all change it without your body changing.</string>
 
@@ -215,7 +215,7 @@
     <!-- Added to a night vital's How row when it's opened from the Sleep tab: heart rate. Month and Year are the detail's ranges. -->
     <string name="day_info_night_heart_rate">Opened from the night, it shows only your sleep: the line from falling asleep to waking, the lowest while asleep and the strap\'s average for the night. Month and Year are whole days.</string>
     <!-- The same for blood oxygen. -->
-    <string name="day_info_night_spo2">Opened from the night, it shows the strap\'s readings in sleep, kept apart from the spot readings in the day, against your earlier nights.</string>
+    <string name="day_info_night_spo2">Opened from the night, it shows the strap\'s readings in sleep, kept apart from the readings in the day, against your earlier nights.</string>
     <!-- The same for breathing rate. -->
     <string name="day_info_night_breathing">Opened from the night, it\'s that night\'s readings, against your earlier nights.</string>
     <!-- The same for HRV and skin temperature. -->
