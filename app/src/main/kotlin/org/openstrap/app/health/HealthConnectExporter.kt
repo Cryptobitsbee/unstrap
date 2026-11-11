@@ -367,11 +367,11 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     }
 
     /**
-     * One blood oxygen record per stored reading, 1 to 100 as the strap sent it (Health Connect takes 0 to 100; 0 is
-     * what the strap sends for none, and never stored).
+     * One blood oxygen record per stored reading, the percent as the strap sent it. Only 80 to 100, the range Zepp
+     * keeps and so the one stored ([org.openstrap.protocol.history.SpO2Reading.isPlausible]).
      */
     internal suspend fun bloodOxygen(from: Long, to: Long): List<Record> = dao.spo2Once(from, to)
-        .filter { it.percent in 1..100 }
+        .filter { it.percent in SPO2_KEPT }
         .map { o ->
             OxygenSaturationRecord(
                 time = Instant.ofEpochSecond(o.timestamp), zoneOffset = offset(o.timestamp),
@@ -640,6 +640,9 @@ internal suspend fun RecordStore.dropStaleStrapWorkouts(from: Long, to: Long, wr
     }.map { it.metadata.id }
     stale.chunked(HC_BATCH).forEach { deleteIds(androidx.health.connect.client.records.ExerciseSessionRecord::class, it) }
 }
+
+/** The blood oxygen percents that are kept, and so exported: Zepp's range. */
+private val SPO2_KEPT = 80..100
 
 /** The start of a strap workout session's clientRecordId. */
 private const val STRAP_WORKOUT_PREFIX = "openstrap:strapworkout:"

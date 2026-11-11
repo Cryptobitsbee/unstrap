@@ -159,8 +159,8 @@ data class SpO2Reading(
     val isAuto: Boolean,
     val history: List<Int>?,
 ) : HistoryRecord {
-    /** Every reading the strap sent is kept, 1..100: 0 is none and above 100 (127) is its invalid marker. */
-    val isPlausible: Boolean get() = spo2 in 1..100
+    /** Zepp 10.10.5 keeps only 80..100 and drops the rest before storing (`d/eo00.java:158`); 127 is the invalid marker. */
+    val isPlausible: Boolean get() = spo2 in 80..100
 }
 
 /** Type 38: sleep SpO2 samples. [v2] extras are present only for version 2. */

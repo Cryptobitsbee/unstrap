@@ -30,11 +30,11 @@ class ZeppJobsTest {
     }
 
     @Test
-    fun theStrapsJobListIsZepps() {
+    fun theStrapsJobListIsZeppsThenSkinTemperature() {
         assertEquals(
             listOf(
                 "58", "66", "72", "1", "r08", "5", "r0c", "r06", "73", "19", "18", "37", "38", "39", "59", "pai",
-                "56", "57", "70", "61", "74", "76", "87", "88", "78", "44",
+                "56", "57", "70", "61", "74", "76", "87", "88", "78", "44", "46",
             ),
             names(ZeppJobs.list(gates())),
         )
@@ -47,8 +47,12 @@ class ZeppJobsTest {
         assertTrue("r0c" !in jobs && "44" !in jobs && "pai" !in jobs && "13" in jobs)
         // No readiness module, no readiness jobs.
         assertTrue(names(ZeppJobs.list(gates(endpoints = emptySet()))).none { it.startsWith("r") || it == "pai" })
-        // Never: 2, 46, 43, 86, 7.
-        assertTrue(names(ZeppJobs.list(gates())).none { it in setOf("2", "46", "43", "86", "7") })
+        // Never: 2, 43, 86, 7.
+        assertTrue(names(ZeppJobs.list(gates())).none { it in setOf("2", "43", "86", "7") })
+        // Skin temperature (46) is last, after statistics or without them, and only when the strap advertises it.
+        assertEquals("46", names(ZeppJobs.list(gates(statisticsDue = false))).last())
+        val unadvertised = ZeppJobs.Gates(advertised - 46, features, { true }, 3, 5, sleepPlan = true, statisticsDue = true)
+        assertTrue("46" !in names(ZeppJobs.list(unadvertised)))
     }
 
     @Test

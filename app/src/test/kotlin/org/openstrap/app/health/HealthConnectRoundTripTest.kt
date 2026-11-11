@@ -133,10 +133,10 @@ class HealthConnectRoundTripTest {
         assertEquals(Instant.ofEpochSecond(100 * h), records.first().time)
     }
 
-    @Test fun `blood oxygen below 80 is exported, 0 and above 100 are not`() = runTest {
+    @Test fun `blood oxygen is exported from 80 to 100 only, as it is stored`() = runTest {
         dao.insertSpo2(listOf(0, 1, 70, 79, 80, 100, 101, 127).mapIndexed { i, p -> Spo2Sample(100 * h + i * 60, p) })
         val records = exporter.bloodOxygen(100 * h, 101 * h).map { it as OxygenSaturationRecord }
-        assertEquals(listOf(1.0, 70.0, 79.0, 80.0, 100.0), records.map { it.percentage.value })
+        assertEquals(listOf(80.0, 100.0), records.map { it.percentage.value })
     }
 
     private fun strap(start: Long, end: Long, sport: Int = 1, vo2max: Int? = null) = Workout(
