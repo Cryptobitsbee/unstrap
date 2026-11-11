@@ -108,12 +108,13 @@ class SleepCopyTest {
                 .first { it.metric == Metric.SkinTemperature }
         }
         val formed = row(8)
-        assertEquals("36.5", formed.value)
-        assertEquals("+0.5 \u00B0C", formed.status)
+        fun n(ascii: String) = org.openstrap.app.presentation.localNumber(ascii, java.util.Locale.getDefault())
+        assertEquals(n("36.5"), formed.value)
+        assertEquals("+${n("0.5")} \u00B0C", formed.status)
         assertEquals(1, formed.direction)
         // While the normal forms, the level and how far along it is.
         val forming = row(3)
-        assertEquals("36.5", forming.value)
+        assertEquals(n("36.5"), forming.value)
         assertTrue(forming.status, forming.status.startsWith("Learning"))
         assertNull(forming.direction)
     }

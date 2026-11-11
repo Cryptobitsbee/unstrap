@@ -9,6 +9,7 @@ import org.openstrap.app.presentation.DetailCopy.Latest
 import org.openstrap.app.presentation.DetailCopy.Level
 import java.time.LocalDate
 import java.util.Locale
+import org.openstrap.app.presentation.localNumber
 import org.openstrap.app.presentation.DaySource
 import org.openstrap.app.presentation.DetailCopy
 import org.openstrap.app.presentation.Metric
@@ -129,18 +130,21 @@ class DetailCopyTest {
     }
 
     @Test fun `skin temperature's change on a card is just the signed change and its unit`() {
-        assertEquals("+0.3 °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0.3f))
-        assertEquals("\u22120.2 °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.2f))
+        // Numbers as the test's locale writes them: the build also runs these under German.
+        fun n(ascii: String) = localNumber(ascii, Locale.getDefault())
+        assertEquals("+${n("0.3")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0.3f))
+        assertEquals("\u2212${n("0.2")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.2f))
         // No change, or one that rounds to nothing, keeps a plus, never a lone minus.
-        assertEquals("+0.0 °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0f))
-        assertEquals("+0.0 °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.01f))
+        assertEquals("+${n("0.0")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, 0f))
+        assertEquals("+${n("0.0")} °C", DetailCopy.changeWithUnit(Metric.SkinTemperature, -0.01f))
     }
 
     @Test fun `skin temperature's day says its change and which side of your normal it is on`() {
         val skin = Metric.SkinTemperature
-        assertEquals("\u22120.7 °C, below your normal", DetailCopy.skinChangeWord(skin, -0.7f, -1))
-        assertEquals("+1.4 °C, above your normal", DetailCopy.skinChangeWord(skin, 1.4f, 1))
-        assertEquals("+0.1 °C, within your normal", DetailCopy.skinChangeWord(skin, 0.1f, 0))
+        fun n(ascii: String) = localNumber(ascii, Locale.getDefault())
+        assertEquals("\u2212${n("0.7")} °C, below your normal", DetailCopy.skinChangeWord(skin, -0.7f, -1))
+        assertEquals("+${n("1.4")} °C, above your normal", DetailCopy.skinChangeWord(skin, 1.4f, 1))
+        assertEquals("+${n("0.1")} °C, within your normal", DetailCopy.skinChangeWord(skin, 0.1f, 0))
     }
 
     @Test fun `the strip ends today while the day shown is in the last week`() {

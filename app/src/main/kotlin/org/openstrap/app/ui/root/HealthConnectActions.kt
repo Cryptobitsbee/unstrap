@@ -50,7 +50,10 @@ internal class HealthConnectActions(
     val export: () -> Unit,
     /** Auto sync on or off. */
     val auto: (Boolean) -> Unit,
-    /** True while Health Connect is there and the optional permissions (calories, breathing rate, VO2 max) are not granted: the page offers them again. */
+    /**
+     * True while Health Connect is there and the optional permissions (calories, breathing rate, VO2 max) are not
+     * granted: the page offers them again.
+     */
     val caloriesMissing: Boolean,
     /** Asks for just the optional permissions. */
     val offerCalories: () -> Unit,
