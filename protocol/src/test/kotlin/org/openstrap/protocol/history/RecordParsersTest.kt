@@ -213,10 +213,12 @@ class RecordParsersTest {
 
     @Test
     fun spo2Legacy() {
-        val p = w().u32(t0).u8(0x80 or 97).u32(t0 + 60).u8(70).toByteArray()
+        val p = w().u32(t0).u8(0x80 or 97).u32(t0 + 60).u8(70).u32(t0 + 120).u8(127).u32(t0 + 180).u8(0).toByteArray()
         val res = ok(HistoryParsers.spo2Single.parse(p, ctx))
         assertEquals(97, res.records[0].spo2); assertTrue(res.records[0].isAuto); assertTrue(res.records[0].isPlausible)
-        assertEquals(70, res.records[1].spo2); assertFalse(res.records[1].isAuto); assertFalse(res.records[1].isPlausible)
+        assertEquals(70, res.records[1].spo2); assertFalse(res.records[1].isAuto); assertTrue(res.records[1].isPlausible)
+        // Every reading from 1 to 100 is kept; 127 is the invalid marker and 0 is none.
+        assertFalse(res.records[2].isPlausible); assertFalse(res.records[3].isPlausible)
         assertNull(res.records[0].history)
     }
 

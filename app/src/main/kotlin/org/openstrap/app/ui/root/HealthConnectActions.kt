@@ -74,7 +74,8 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
         val auto = hcForAuto
         hcForAuto = false
         scope.launch {
-            // The needed ones may have been granted before, outside what this screen returns. The calorie ones may stay off.
+            // The needed ones may have been granted before, outside what this screen returns. The optional ones
+            // (calories, breathing rate, VO2 max) may stay off.
             when {
                 !rootVm.healthConnectWriteGranted(granted) -> Toast.makeText(context, HC_NOT_GRANTED, Toast.LENGTH_LONG).show()
                 auto -> deviceVm.setAutoHealthConnect(true)
@@ -99,7 +100,7 @@ internal fun rememberHealthConnectActions(rootVm: AppRootViewModel, deviceVm: De
     // The manual copy, or turning auto sync on ([forAuto]): with the write permissions, asked for first when missing.
     val write: (Boolean) -> Unit = { forAuto ->
         scope.launch {
-            // The calorie permissions are optional, but asked for again until granted: the launcher goes on with the
+            // The optional permissions are asked for again until granted: the launcher goes on with the
             // ones it needs.
             when (val hc = rootVm.healthConnectWrite()) {
                 HcState.Unavailable -> Toast.makeText(context, HC_UNAVAILABLE, Toast.LENGTH_LONG).show()
