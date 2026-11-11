@@ -52,6 +52,8 @@
     <string name="glow_metrics_latest_reading">Latest reading</string>
     <!-- Under Resting heart rate and Steps: the number is the day's. -->
     <string name="glow_metrics_for_the_day">For the day</string>
+    <!-- Under the day's resting heart rate when the strap sent none and unstrap estimated it. -->
+    <string name="glow_metrics_for_the_day_estimated">For the day, estimated</string>
     <!-- Under HRV, blood oxygen, skin temperature, breathing and stress: the number is the day's average. -->
     <string name="glow_metrics_day_average">Day average</string>
     <string name="glow_metrics_night_average">Average asleep</string>
@@ -89,10 +91,12 @@
     <string name="glow_metrics_breathing_in_sleep">Breathing rate is measured during sleep.</string>
     <!-- Beside a held reading's number: its unit and the day. The unit is "bpm", "ms" or "%", the day "Wed 21". -->
     <string name="glow_metrics_unit_day"><xliff:g id="unit" example="bpm">%1$s</xliff:g>, <xliff:g id="day" example="Wed 21">%2$s</xliff:g></string>
-    <!-- Beside a held reading's number: its unit and the time it was taken. -->
-    <string name="glow_metrics_unit_at_time"><xliff:g id="unit" example="bpm">%1$s</xliff:g> at <xliff:g id="time" example="22:30">%2$s</xliff:g></string>
-    <!-- Beside a held reading's number that has no unit: the time it was taken. -->
-    <string name="glow_metrics_at_time">at <xliff:g id="time" example="22:30">%1$s</xliff:g></string>
+    <!-- Beside a held point of a line made of averages: its unit, how many minutes it averages and when they start. -->
+    <string name="glow_metrics_unit_average_from_time"><xliff:g id="unit" example="bpm">%1$s</xliff:g>, <xliff:g id="minutes" example="5">%2$d</xliff:g> min average from <xliff:g id="time" example="22:30">%3$s</xliff:g></string>
+    <!-- The same for a metric that has no unit. -->
+    <string name="glow_metrics_average_from_time"><xliff:g id="minutes" example="15">%1$d</xliff:g> min average from <xliff:g id="time" example="22:30">%2$s</xliff:g></string>
+    <!-- Beside skin temperature's change from your normal: the unit, then the level itself. -->
+    <string name="glow_metrics_unit_from_normal"><xliff:g id="unit" example="°C">%1$s</xliff:g> from your normal, at <xliff:g id="level" example="36.4">%2$s</xliff:g> <xliff:g id="unit_again" example="°C">%1$s</xliff:g></string>
     <!-- Beside a held hour's steps: the hour. -->
     <string name="glow_metrics_steps_hours">steps, <xliff:g id="hours" example="09:00 to 10:00">%1$s</xliff:g></string>
     <!-- The held point on a year's chart is a week: when it starts. The date is "21 Oct". -->

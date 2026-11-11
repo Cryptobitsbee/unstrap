@@ -48,6 +48,8 @@
     <string name="day_sleep_score_label_last_night">last night</string>
     <!-- The same on an earlier day. -->
     <string name="day_sleep_score_label_that_night">that night</string>
+    <!-- The same label when the score is the strap's moved for the times the user set. Lower case. -->
+    <string name="day_sleep_score_label_adjusted"><xliff:g id="label" example="last night">%1$s</xliff:g>, adjusted</string>
     <!-- In place of the Sleep score when the strap gave none, a word or two. -->
     <string name="day_sleep_no_score">No score</string>
     <!-- Under it, on today. -->

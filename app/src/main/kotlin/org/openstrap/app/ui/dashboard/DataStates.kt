@@ -183,7 +183,8 @@ fun DayUiState.previewed(preview: DataPreview?): DayUiState = when (preview) {
 
 private fun DayUiState.withoutNight() = copy(
     sleep = null, previousSleepScore = null, sleepStages = emptyList(), sleepBreakdown = null, sleepSpo2 = emptyList(),
-    osaResult = null, osaEvents = emptyList(), sleepHeartRate = emptyList(), sleepHrv = emptyList(), sleepSkinTemperature = emptyList(),
+    osaResult = null, osaEvents = emptyList(), sleepHeartRate = emptyList(), sleepHeartMinutes = emptyList(), sleepHrv = emptyList(),
+    sleepSkinTemperature = emptyList(),
 )
 
 /**

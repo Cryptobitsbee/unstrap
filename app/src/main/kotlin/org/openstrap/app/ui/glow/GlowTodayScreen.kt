@@ -784,7 +784,7 @@ private fun TodayRow(
             listOf(
                 BodyRow(
                     stringResource(R.string.glow_today_resting_hr), MetricColors.heart, s.restingHeartRate?.toFloat(),
-                    normal(Metric.RestingHr), "", Metric.RestingHr,
+                    normal(Metric.RestingHr), "", Metric.RestingHr, estimated = s.restingEstimated,
                 ),
                 // Night signals: last night's against the nights before, as the Sleep tab and their details read them.
                 BodyRow(

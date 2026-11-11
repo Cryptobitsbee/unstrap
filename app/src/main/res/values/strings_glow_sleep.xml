@@ -8,6 +8,8 @@
     <string name="glow_sleep_breathing_title">Breathing disturbances</string>
     <!-- Title of the Sleep tab's hero. -->
     <string name="glow_sleep_last_night">Last night</string>
+    <!-- Beside the Sleep tab's score word when the strap's score was moved for the times the user set: "Good, adjusted". -->
+    <string name="glow_sleep_score_adjusted"><xliff:g id="word" example="Good">%1$s</xliff:g>, adjusted</string>
     <!-- A button that brings back a deleted night. -->
     <string name="glow_sleep_restore">Restore</string>
     <!-- Under the night on the Sleep tab when the strap's own sleep for it was missing or wrong, and the app worked out the times from the strap's minute by minute data instead. Those nights have no stages or strap score. -->

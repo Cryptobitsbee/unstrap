@@ -64,6 +64,27 @@ class AllMetricsTest {
         assertEquals("36.5", rows.getValue(open(Metric.SkinTemperature)).value)
     }
 
+    @Test fun `a resting heart rate unstrap estimated says so`() {
+        fun status(estimated: Boolean) = metricIndex(empty.copy(restingHeartRate = 54, restingEstimated = estimated), null, null, emptyList())
+            .flatMap { it.rows }.first { it.target == open(Metric.RestingHr) }.status
+        assertEquals("For the day", status(false))
+        assertEquals("For the day, estimated", status(true))
+    }
+
+    @Test fun `skin temperature leads with its change from your normal once there is one, the level under it`() {
+        val sleep = SleepSession(start = 0, end = 8 * 3600)
+        // Eight nights at 35.9 and 36.1 by turns: a normal of 36.0.
+        val before = (1L..8L).map { SleepNight(empty.date.minusDays(it), SleepSession(0, 1), skinTemperature = if (it % 2 == 0L) 35.9f else 36.1f) }
+        fun row(nights: List<SleepNight>) = metricIndex(
+            empty.copy(sleep = sleep, nights = nights + SleepNight(empty.date, sleep, skinTemperature = 36.5f)), null, null, emptyList(),
+        ).flatMap { it.rows }.first { it.target == open(Metric.SkinTemperature) }
+        // Before there's a normal, the absolute figure.
+        assertEquals("36.5", row(emptyList()).value)
+        val led = row(before)
+        assertEquals("+0.5", led.value)
+        assertEquals("°C from your normal, at 36.5 °C", led.status)
+    }
+
     private fun readiness(score: Int?, nights: Int, withheld: Boolean = false) =
         org.openstrap.app.data.Recovery.Readiness(score, emptyList(), nights, false, emptyList(), false, withheld = withheld)
 

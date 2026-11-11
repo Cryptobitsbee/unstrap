@@ -471,12 +471,15 @@ internal fun HeartCard(
         MetricColors.heart, modifier.fillMaxWidth().gridSize(CardSize.Wide), onClick = onClick,
     ) {
         EdgeTitle(
-            stringResource(R.string.glow_today_heart_rate), state.restingHeartRate?.let { stringResource(R.string.glow_today_resting, it) },
+            stringResource(R.string.glow_today_heart_rate), restingNote(state),
             marker = upTo,
         )
         val at = scrubbed?.second ?: state.heartRate.lastOrNull()?.x
         EdgeValue(
-            now?.toString(), stringResource(R.string.glow_unit_bpm), TodayCopy.heartAt(live != null && scrubbed == null, at?.let(::clock)),
+            now?.toString(), stringResource(R.string.glow_unit_bpm),
+            // A held point is the average of a 10-minute stretch, not one reading.
+            if (scrubbed != null) stringResource(R.string.core_today_heart_average_from, step / SECONDS_PER_MINUTE, clock(scrubbed.second))
+            else TodayCopy.heartAt(live != null, at?.let(::clock)),
         )
         if (state.heartRate.size >= 2) {
             Spacer(Modifier.height(10.dp))
@@ -514,15 +517,23 @@ internal fun HeartDayCard(
         offTag(OffWords.Normal, off),
         // A Small says where the day sits against your normal once there is one, a Wide when the reading was taken.
         if (size == PictureSize.Small && normal != null && mean != null && !off.off) TodayCopy.normalWord(0) else at,
-        modifier, note = state.restingHeartRate?.let { stringResource(R.string.glow_today_resting, it) },
+        modifier, note = restingNote(state),
         rim = if (rimLit(OffWords.Normal, off)) dayLineRim(values, off == OffStatus.Above, size) else null,
         onClick = onClick, marker = upTo,
         picture = if (state.heartRate.size < 2) null else { m -> DayLine(values, restingRange?.let { it.low..it.high }, MetricColors.heart, size, m) },
     )
 }
 
+/** The heart rate cards' note on the title row: the day's resting heart rate, marked as an estimate when the strap sent none. */
+@Composable
+@ReadOnlyComposable
+internal fun restingNote(state: DayUiState): String? = state.restingHeartRate?.let {
+    stringResource(if (state.restingEstimated) R.string.glow_today_resting_estimated else R.string.glow_today_resting, it)
+}
+
 /** Heart rate's line on Today: a point every ten minutes. */
 private const val HEART_STEP = 10 * 60L
+private const val SECONDS_PER_MINUTE = 60L
 
 /**
  * Stress on Today (spec 4.2): the day as one strip, calm to high ([DayStrip], [DayUiState.stressStrip]), the latest
@@ -542,10 +553,8 @@ internal fun StressDayCard(
         offTag(OffWords.Usual, off),
         when {
             now == null -> waiting
-            // Off, the tag says how it's going and the line when it was read.
-            off.off -> TodayCopy.heartAt(false, clock(now.x))
-            normal == null -> TodayCopy.normalWord(null)
-            else -> TodayCopy.normalWord(0)
+            // The number is the latest reading, whenever it was taken (the other screens give the day's average).
+            else -> stringResource(R.string.glow_today_stress_latest, clock(now.x))
         },
         modifier, rim = if (rimLit(OffWords.Usual, off)) dayStripRim(levels, size) else null, onClick = onClick, marker = upTo,
         picture = if (levels.none { it != null }) null else { m -> DayStrip(levels, MetricColors.stress, size, m) },
@@ -868,6 +877,8 @@ internal class BodyRow(
     val name: String, val color: Color, val value: Float?, val normal: org.openstrap.app.data.History.Normal?, val unit: String, val metric: Metric,
     /** What the row says while its normal is forming, "Learning, 5 of 7 nights"; null for the plain word. */
     val learning: String? = null,
+    /** True when [value] is unstrap's own estimate, which the row says. */
+    val estimated: Boolean = false,
 )
 
 /**
@@ -886,6 +897,7 @@ internal fun BodyList(
                 when {
                     r.value == null -> waiting
                     r.normal == null && r.learning != null -> r.learning
+                    r.estimated -> stringResource(R.string.glow_today_body_estimated, TodayCopy.normalWord(direction))
                     else -> TodayCopy.normalWord(direction)
                 },
                 tag = org.openstrap.app.ui.dashboard.bodyTag(r.metric, direction), onClick = { onOpenMetric(r.metric) }, divider = i > 0,

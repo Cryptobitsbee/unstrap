@@ -58,6 +58,8 @@
     <string name="core_detail_label_bpm_now">bpm now</string>
     <string name="core_detail_label_bpm_latest">bpm, latest</string>
     <string name="core_detail_label_bpm_resting">bpm resting</string>
+    <!-- The label under a resting heart rate unstrap worked out itself, because the strap sent none for the day. -->
+    <string name="core_detail_label_bpm_resting_estimated">bpm resting, estimated</string>
     <string name="core_detail_label_steps_today">steps so far today</string>
     <string name="core_detail_label_steps">steps</string>
     <!-- br/min is breaths a minute. -->

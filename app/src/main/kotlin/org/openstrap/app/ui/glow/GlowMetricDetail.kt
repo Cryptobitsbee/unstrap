@@ -493,12 +493,16 @@ internal fun DetailEmpty(text: String) {
 
 private val HOURS = listOf("00", "06", "12", "18", "24")
 
-/** A day's value of [metric]: the live or latest heart rate, the strap's resting heart rate, the day's steps, else the average of its readings. */
+/**
+ * A day's value of [metric]: the live or latest heart rate, the resting heart rate, the day's steps, HRV from the night's
+ * readings, else the average of the day's readings.
+ */
 internal fun dayValue(metric: Metric, state: DayUiState, live: Int? = null): Float? = when (metric) {
     Metric.HeartRate -> (live ?: state.latestHeartRate)?.toFloat()
     Metric.RestingHr -> state.restingHeartRate?.toFloat()
     Metric.Steps -> state.steps.toFloat().takeIf { it > 0f }
-    Metric.Hrv -> state.hrv.avg()?.toFloat()
+    // The night's average, the one HRV figure on every screen ([NightMetrics.sleepHrv]).
+    Metric.Hrv -> SleepCopy.nightValue(state, Metric.Hrv)
     Metric.Spo2 -> state.spo2.avg()?.toFloat()
     Metric.Stress -> state.stress.avg()?.toFloat()
     Metric.SkinTemperature -> state.skinTemperature.takeIf { it.isNotEmpty() }?.map { it.y }?.average()?.toFloat()
@@ -571,9 +575,14 @@ fun GlowMetricDetailScreen(
         range == Range.Year || (range == Range.Day && metric == Metric.HeartRate) -> null
         else -> History.status(value, normal)
     }
-    val label = if (night) SleepCopy.nightLabel(metric, range) else DetailCopy.valueLabel(metric, range, live = live != null, today = isToday)
+    val label = if (night) SleepCopy.nightLabel(metric, range) else DetailCopy.valueLabel(
+        metric, range, live = live != null, today = isToday, estimated = metric == Metric.RestingHr && state.restingEstimated,
+    )
+    // The normal the value is read against, for skin temperature's change from it. A day's only: a longer range's
+    // label says what it averages, which the change's label would take the place of.
+    val headNormal = (if (fromNight) nightNormal else normal).takeIf { range == Range.Day }
     val headline = when {
-        value != null -> DetailHeadline(metric.format(value, Units.DOT_LOCALE), label, DetailCopy.statusWord(status))
+        value != null -> valueHeadline(metric, value, label, headNormal, DetailCopy.statusWord(status))
         night && range == Range.Day -> SleepCopy.nightNoValue(state.sleep != null, isToday).let { (word, why) -> DetailHeadline.none(word, why) }
         night && range == Range.Week ->
             DetailHeadline.none(stringResource(R.string.glow_no_reading), stringResource(R.string.glow_metrics_last_7_nights))
@@ -600,7 +609,7 @@ fun GlowMetricDetailScreen(
             val sentence = when {
                 value == null -> null
                 metric == Metric.HeartRate -> SleepCopy.lowestHeart(state).let { low ->
-                    SleepCopy.nightHeart(low?.y?.toInt(), low?.x?.let(::clock), Math.round(value), isToday)
+                    SleepCopy.nightHeart(low?.y?.let(Math::round), low?.x?.let(::clock), Math.round(value), isToday)
                 }
                 else -> DetailCopy.day(status, org.openstrap.app.presentation.DaySource.Night, isToday, nightDays)
             }
@@ -635,9 +644,8 @@ fun GlowMetricDetailScreen(
             item { DayChart(metric, state, color, value != null, normalOf = { m -> rememberNormal(m, end, history) }) { scrub = it } }
             val sentence = when {
                 value == null -> null
-                metric == Metric.HeartRate -> state.heartRate.takeIf { it.isNotEmpty() }?.let { s ->
-                    DetailCopy.heartDay(s.minOf { it.y }.toInt(), s.maxOf { it.y }.toInt(), isToday)
-                }
+                // The day's stored lowest and highest readings, the strap's own maximum when higher, not the chart's averages.
+                metric == Metric.HeartRate -> state.heartRateRange?.let { (low, high) -> DetailCopy.heartDay(low, high, isToday) }
                 else -> DetailCopy.day(status, org.openstrap.app.presentation.daySource(metric), isToday, normalDays)
             }
             if (sentence != null) item { DetailSentence(sentence) }
@@ -712,22 +720,42 @@ private fun NightChart(metric: Metric, state: DayUiState, color: Color, onScrub:
         GlowLineChart(
             values, height = 220.dp, labels = listOf(clock(window.first), clock(window.last)), color = color, showAverage = false, format = metric::format,
             onScrub = { i ->
-                onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot) })
+                onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot, slot) })
             },
         )
     }
 }
 
-/** A scrubbed reading of [metric] in the headline: its value and the time it was taken, "bpm at 22:30". */
-private fun scrubAt(metric: Metric, v: Float, at: Long, strings: Strings = Strings.app) = DetailHeadline(
+/**
+ * A scrubbed point of [metric]'s line in the headline: its value and the time it starts. The line is made of averages
+ * over [slot] seconds, so it says so: "bpm, 5 min average from 22:30".
+ */
+private fun scrubAt(metric: Metric, v: Float, at: Long, slot: Long, strings: Strings = Strings.app) = DetailHeadline(
     metric.format(v, Units.DOT_LOCALE),
     if (metric.unit.isBlank()) {
-        strings.format(R.string.glow_metrics_at_time, clock(at))
+        strings.format(R.string.glow_metrics_average_from_time, slot / SECONDS_PER_MINUTE, clock(at))
     } else {
-        strings.format(R.string.glow_metrics_unit_at_time, metric.unit, clock(at))
+        strings.format(R.string.glow_metrics_unit_average_from_time, metric.unit, slot / SECONDS_PER_MINUTE, clock(at))
     },
     null,
 )
+
+private const val SECONDS_PER_MINUTE = 60L
+
+/**
+ * [v] as a detail's headline. Skin temperature, once there's a [normal], leads with its change from it and keeps the
+ * level small in the label; before that, and for everything else, it's the value under [label].
+ */
+private fun valueHeadline(metric: Metric, v: Float, label: String, normal: History.Normal?, word: String?, strings: Strings = Strings.app) =
+    if (metric == Metric.SkinTemperature && normal != null) {
+        DetailHeadline(
+            metric.formatChange(v - normal.mean, Units.DOT_LOCALE),
+            strings.format(R.string.glow_metrics_unit_from_normal, metric.unit, metric.format(v)),
+            word,
+        )
+    } else {
+        DetailHeadline(metric.format(v, Units.DOT_LOCALE), label, word)
+    }
 
 /** A held hour's steps in the headline: "steps, 09:00 to 10:00". */
 private fun hourSteps(hour: Int, steps: Float, strings: Strings = Strings.app): DetailHeadline {
@@ -784,7 +812,7 @@ private fun DayChart(metric: Metric, state: DayUiState, color: Color, hasValue: 
                 GlowLineChart(
                     values, height = 220.dp, labels = labels, color = color, showAverage = false, band = band, format = metric::format,
                     onScrub = { i ->
-                        onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot) })
+                        onScrub(i?.let { values[it] }?.let { v -> scrubAt(metric, v, window.first + i * slot, slot) })
                     },
                 )
             }

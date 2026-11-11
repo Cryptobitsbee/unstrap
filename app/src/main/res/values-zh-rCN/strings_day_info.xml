@@ -30,12 +30,12 @@
     <string name="day_info_heart_rate_off">手环佩戴偏松、手部冰凉或手臂频繁活动都可能导致读数跳动。实时测量频率更高，因此开启时曲线看起来波动更频繁。</string>
     <string name="day_info_resting_hr_name">静息心率</string>
     <string name="day_info_resting_hr_meaning">你在最平静时的心率。数值越低，通常代表体能越好、心脏休息越充分。</string>
-    <string name="day_info_resting_hr_how">手环每天会根据你最平静的一段时间（通常在睡眠中）计算出该数值。当过去 30 天中有 7 天具有有效数据时，其居中水平加减常规波动范围即为你的常态。</string>
+    <string name="day_info_resting_hr_how">通常采用手环当天提供的数值，取自你最平静的一段时间（通常在睡眠中）。若手环当天没有提供，unstrap 会根据全天最平静的半小时进行估算，并会注明。当过去 30 天中有 7 天具有有效数据时，其居中水平加减常规波动范围即为你的常态。</string>
     <string name="day_info_resting_hr_moves">在高强度训练、深夜进食、饮酒、睡眠不佳或身体在抵抗不适时，它会上升；随着体能提升，它会逐渐下降。</string>
     <string name="day_info_resting_hr_off">夜间手环佩戴偏松或未佩戴会导致参考数据不足。单日的偏高并不能说明太多问题，连续数天的趋势更有参考价值。</string>
     <string name="day_info_hrv_name">HRV</string>
     <string name="day_info_hrv_meaning">心率变异性，即每次心跳之间微小的时间变化。高于你的常态通常意味着身体恢复良好。</string>
-    <string name="day_info_hrv_how">手环会在你静止时（主要是睡眠中）测量每次心跳之间的时间间隔，单位为毫秒（ms），当日数值为测量读数的平均值。该数值会与你自己的常态进行对照：即过去 30 天的居中水平加减常规波动范围。</string>
+    <string name="day_info_hrv_how">手环会在你静止时（主要是睡眠中）测量每次心跳之间的时间间隔，单位为毫秒（ms）。该数值为整个睡眠期间测量读数的平均值，精确到毫秒。该数值会与你自己的常态进行对照：即过去 30 天的居中水平加减常规波动范围。</string>
     <string name="day_info_hrv_moves">良好的睡眠和充分的休息会让它升高；压力、高强度训练和饮酒会使它降低。请将其与你自己的常态对比，而不是与他人比较。</string>
     <string name="day_info_hrv_off">测量期间身体活动、手环佩戴偏松或睡眠时间过短都会减少有效读数。HRV 每天的波动很大，因此连续数天的走势比单日读数更具参考意义。</string>
     <string name="day_info_spo2_name">血氧</string>
@@ -55,7 +55,7 @@
     <string name="day_info_skin_temp_off">温暖的被窝、厚重的被子或手环佩戴偏松，都可能在身体本身并无变化的情况下改变读数。</string>
     <string name="day_info_breathing_name">呼吸频率</string>
     <string name="day_info_breathing_meaning">你在睡眠中每分钟呼吸的次数。对大多数人而言，这一数值十分稳定。</string>
-    <string name="day_info_breathing_how">手环会在睡眠期间进行测量，因此每晚生成一个数值，并与过去 30 天你的常态进行对比。</string>
+    <string name="day_info_breathing_how">手环会在整个睡眠期间进行测量，该数值为这些读数的平均值，并与过去 30 天你的常态进行对比。</string>
     <string name="day_info_breathing_moves">在高强度训练之后、处于温暖闷热的房间或身体在抵抗不适时，它可能会高于你的常态。</string>
     <string name="day_info_breathing_off">夜间辗转反侧或部分时间未佩戴手环，都会导致可供参考的读数变少。</string>
     <string name="day_info_steps_name">步数</string>

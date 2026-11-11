@@ -541,6 +541,8 @@ private fun SignalsList(signals: List<BodySignal>, waiting: String, onOpen: (Met
                 when {
                     s.value == null -> waiting
                     s.learning != null -> s.learning
+                    // Stress here is the day's average, not the latest reading Today's card shows.
+                    s.metric == Metric.Stress -> stringResource(R.string.glow_recovery_stress_average, TodayCopy.normalWord(s.direction))
                     else -> TodayCopy.normalWord(s.direction)
                 },
                 tag = s.tag, onClick = { onOpen(s.metric) }, divider = i > 0, icon = s.metric.rowIcon(),

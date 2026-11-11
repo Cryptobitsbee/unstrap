@@ -1,5 +1,6 @@
 package org.openstrap.app.data
 
+import org.openstrap.app.data.db.HrvSample
 import org.openstrap.app.data.db.NightMetricsRow
 import org.openstrap.app.data.db.StrapReadinessRow
 import java.time.ZoneId
@@ -7,6 +8,23 @@ import kotlin.math.ln
 
 /** OpenStrap's own nightly inputs as logged for the calibration review (evidence-review.md, implementation step 1). */
 object NightMetrics {
+    /**
+     * The RMSSD readings inside the sleep from [start] to [end] that count: within [Recovery.HRV_MIN_MS] to
+     * [Recovery.HRV_MAX_MS]. The one gate for every night's HRV, in Recovery and on every screen.
+     */
+    fun sleepHrvReadings(hrv: List<HrvSample>, start: Long, end: Long): List<Int> =
+        hrv.filter { it.timestamp in start..end && it.milliseconds in Recovery.HRV_MIN_MS..Recovery.HRV_MAX_MS }.map { it.milliseconds }
+
+    /** The mean of a night's gated [readings] ([sleepHrvReadings]), as Recovery works with it; null without any. */
+    fun hrvMean(readings: List<Int>): Float? = readings.takeIf { it.isNotEmpty() }?.average()?.toFloat()
+
+    /**
+     * The night's HRV as every screen shows it: [hrvMean] of the gated readings inside the sleep, to the nearest whole ms.
+     * Recovery's "what drove it" rounds the same mean the same way, so they cannot differ.
+     */
+    fun sleepHrv(hrv: List<HrvSample>, start: Long, end: Long): Float? =
+        hrvMean(sleepHrvReadings(hrv, start, end))?.let { Math.round(it).toFloat() }
+
     /** `hrv_n`: ln of the night's mean gated RMSSD; null without one. Never change this inside a baseline. */
     fun hrvLn(n: Recovery.Night): Float? = n.hrv?.takeIf { it > 0 }?.let { ln(it) }
 

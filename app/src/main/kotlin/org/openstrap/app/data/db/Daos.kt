@@ -695,6 +695,19 @@ interface HealthDao : RangedReads {
     @Query("SELECT date(timestamp, 'unixepoch', 'localtime') AS day, AVG(milliseconds) AS value, MIN(milliseconds) AS min, MAX(milliseconds) AS max, COUNT(*) AS count FROM hrv WHERE timestamp BETWEEN :from AND :to GROUP BY day ORDER BY day")
     fun dailyHrv(from: Long, to: Long): Flow<List<DailyAggregate>>
 
+    /**
+     * HRV while asleep, per night: the readings inside each main sleep from 5 to 200 ms ([Recovery.HRV_MIN_MS] to
+     * [Recovery.HRV_MAX_MS]), on the day the sleep ended, the mean rounded to a whole ms as the night's figure is
+     * ([NightMetrics.sleepHrv]).
+     */
+    @Query(
+        "SELECT date(s.`end`, 'unixepoch', 'localtime') AS day, ROUND(AVG(h.milliseconds)) AS value, " +
+            "MIN(h.milliseconds) AS min, MAX(h.milliseconds) AS max, COUNT(*) AS count " +
+            "FROM hrv h JOIN sleep_session s ON s.nap = 0 AND h.timestamp BETWEEN s.start AND s.`end` " +
+            "WHERE h.timestamp BETWEEN :from AND :to AND h.milliseconds BETWEEN 5 AND 200 GROUP BY day ORDER BY day",
+    )
+    fun dailySleepHrv(from: Long, to: Long): Flow<List<DailyAggregate>>
+
     @Query("SELECT date(timestamp, 'unixepoch', 'localtime') AS day, AVG(milliseconds) AS value, MIN(milliseconds) AS min, MAX(milliseconds) AS max, COUNT(*) AS count FROM hrv_sdnn WHERE timestamp BETWEEN :from AND :to GROUP BY day ORDER BY day")
     fun dailyHrvSdnn(from: Long, to: Long): Flow<List<DailyAggregate>>
 

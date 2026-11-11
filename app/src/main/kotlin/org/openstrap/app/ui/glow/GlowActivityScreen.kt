@@ -411,7 +411,7 @@ private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal
     val rim = if (tag != null) dayLineRim(values, status == OffStatus.Above, PictureSize.Wide) else null
     PictureCard(MetricColors.heart, Modifier.fillMaxWidth().gridSize(CardSize.Wide), rim = rim, onClick = onClick) {
         EdgeTitle(
-            stringResource(R.string.glow_today_heart_rate), state.restingHeartRate?.let { stringResource(R.string.glow_today_resting, it) },
+            stringResource(R.string.glow_today_heart_rate), restingNote(state),
         )
         if (state.heartRate.size >= 2) {
             Spacer(Modifier.height(GlowLayout.TitleGap))
@@ -429,12 +429,17 @@ private fun HeartRateCard(state: DayUiState, live: Int?, resting: History.Normal
             now?.toString(), stringResource(R.string.glow_unit_bpm), tag.takeIf { scrubbed == null }, Modifier.padding(top = 14.dp),
         )
         val at = scrubbed?.second ?: state.heartRate.lastOrNull()?.x
-        StatusLine(TodayCopy.heartAt(live != null && scrubbed == null, at?.let(::clock)))
+        // A held point is the average of a 10-minute stretch, not one reading.
+        StatusLine(
+            if (scrubbed != null) stringResource(R.string.core_today_heart_average_from, step / SECONDS_PER_MINUTE, clock(scrubbed.second))
+            else TodayCopy.heartAt(live != null, at?.let(::clock)),
+        )
     }
 }
 
 /** The heart rate line's buckets: 10 minutes each. */
 private const val HEART_STEP_SECONDS = 10 * 60L
+private const val SECONDS_PER_MINUTE = 60L
 
 /** The line's height on the card and the inset [DayLine] draws inside its edges. */
 private val DayLineHeight = 70.dp

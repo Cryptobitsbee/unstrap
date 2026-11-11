@@ -119,5 +119,6 @@
     <string name="core_today_heart_note">按住折线可查看任意时刻数值。</string>
     <string name="core_today_heart_live">实时监测中</string>
     <string name="core_today_heart_at">于 %1$s</string>
+    <string name="core_today_heart_average_from">%2$s 起 %1$d 分钟平均</string>
     <string name="core_today_heart_waiting">等待手环连接</string>
 </resources>

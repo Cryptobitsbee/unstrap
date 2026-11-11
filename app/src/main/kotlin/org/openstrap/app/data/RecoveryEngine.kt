@@ -747,7 +747,7 @@ class RecoveryEngine(private val dao: HealthDao) {
         val inSleep = { t: Long -> t in s.start..s.end }
         val sleepHr = hr.filter { inSleep(it.first) && it.second in Recovery.HR_MIN_BPM..Recovery.HR_MAX_BPM }
         val sleepBpm = sleepHr.map { it.second.toFloat() }
-        val rmssd = hrv.filter { inSleep(it.timestamp) && it.milliseconds in Recovery.HRV_MIN_MS..Recovery.HRV_MAX_MS }.map { it.milliseconds.toFloat() }
+        val rmssd = NightMetrics.sleepHrvReadings(hrv, s.start, s.end)
         val asleep = asleepMinutes(s)
         val skinValues = skin.filter { inSleep(it.timestamp) }.map { it.celsius }
         val spo2Values = spo2.filter { inSleep(it.timestamp) }.map { it.percent.toFloat() }
@@ -760,7 +760,7 @@ class RecoveryEngine(private val dao: HealthDao) {
             deepMinutes = s.deepMinutes,
             remMinutes = s.remMinutes,
             strapScore = s.score,
-            hrv = rmssd.mean(),
+            hrv = NightMetrics.hrvMean(rmssd),
             restingHr = Recovery.lowestAverage(sleepHr, 30, Recovery.RHR_WINDOW_MIN_MINUTES)?.second,
             rhrMeanSleep = sleepBpm.mean(),
             rhrP10 = Recovery.percentile(sleepBpm, 0.10f),

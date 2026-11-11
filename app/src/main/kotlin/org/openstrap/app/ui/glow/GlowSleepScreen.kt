@@ -181,7 +181,9 @@ private fun NightHero(state: DayUiState, firstNights: Boolean, onRestore: (org.o
             HeroNumber(
                 score?.toString(),
                 listOfNotNull(
-                    TabCopy.sleepScoreLine(score),
+                    TabCopy.sleepScoreLine(score).let {
+                        if (state.sleepScoreAdjusted) stringResource(R.string.glow_sleep_score_adjusted, it) else it
+                    },
                     TabCopy.woke(session.wakeCount),
                 ),
             )

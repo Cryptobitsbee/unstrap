@@ -101,12 +101,14 @@ class DataCopyTest {
         assertEquals(
             listOf(
                 "52 ms, −8% vs usual", "54 bpm, +2 vs usual", "7 h 40 asleep", "No sleep debt", "1 h 15 of sleep debt",
-                "Lowest heart rate 1 h 35 before waking", "±0,0 °C vs usual", "+0,4/min vs usual", "96,3%, −1,2 vs usual",
+                "Lowest heart rate 1 h 35 before waking", "±0,0 °C vs usual", "+0,4/min vs usual", "96%, −1,2 vs usual",
                 "Load 140, usual 95",
             ),
             all.map { RecoveryCopy.detail(it) },
         )
-        assertEquals("96.3%, −1.2 vs usual", RecoveryCopy.detail(Recovery.Detail.BloodOxygen(96.25f, -1.2f), Locale.US))
+        // A whole percent, rounded; the change against usual keeps its decimal.
+        assertEquals("96%, −1.2 vs usual", RecoveryCopy.detail(Recovery.Detail.BloodOxygen(96.25f, -1.2f), Locale.US))
+        assertEquals("97%, −1.2 vs usual", RecoveryCopy.detail(Recovery.Detail.BloodOxygen(96.5f, -1.2f), Locale.US))
         assertCleanCopy(all.map { RecoveryCopy.detail(it) } + all.map { RecoveryCopy.detail(it, Locale.US) })
     }
 }

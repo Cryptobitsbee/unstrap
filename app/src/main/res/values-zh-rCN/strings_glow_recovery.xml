@@ -19,6 +19,7 @@
     <string name="glow_recovery_breathing_rate">呼吸频率</string>
     <string name="glow_recovery_blood_oxygen">血氧</string>
     <string name="glow_recovery_stress">压力</string>
+    <string name="glow_recovery_stress_average">%1$s，全天平均</string>
     <string name="glow_recovery_body_signals">身体信号</string>
     <string name="glow_recovery_against_normal">对比你的常态</string>
     <string name="glow_recovery_skin_close">接近你的常态</string>

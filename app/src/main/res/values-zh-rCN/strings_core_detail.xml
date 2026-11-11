@@ -35,6 +35,7 @@
     <string name="core_detail_label_bpm_now">当前 bpm</string>
     <string name="core_detail_label_bpm_latest">bpm，最近一次</string>
     <string name="core_detail_label_bpm_resting">bpm 静息</string>
+    <string name="core_detail_label_bpm_resting_estimated">bpm 静息，估算</string>
     <string name="core_detail_label_steps_today">步，今日目前</string>
     <string name="core_detail_label_steps">步</string>
     <string name="core_detail_label_breathing">br/min，睡眠期间</string>

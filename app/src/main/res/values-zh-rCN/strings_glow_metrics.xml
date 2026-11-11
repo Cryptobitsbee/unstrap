@@ -26,6 +26,7 @@
     <string name="glow_metrics_end_of_day">日终值</string>
     <string name="glow_metrics_latest_reading">最新读数</string>
     <string name="glow_metrics_for_the_day">全天值</string>
+    <string name="glow_metrics_for_the_day_estimated">全天值，估算</string>
     <string name="glow_metrics_day_average">全天平均</string>
     <string name="glow_metrics_night_average">睡眠平均</string>
     <string name="glow_metrics_last_7_days">最近 7 天</string>
@@ -43,8 +44,9 @@
     <string name="glow_metrics_none_this_day">当天暂无数据。</string>
     <string name="glow_metrics_breathing_in_sleep">呼吸频率在睡眠期间测量。</string>
     <string name="glow_metrics_unit_day">%1$s，%2$s</string>
-    <string name="glow_metrics_unit_at_time">%1$s 于 %2$s</string>
-    <string name="glow_metrics_at_time">于 %1$s</string>
+    <string name="glow_metrics_unit_average_from_time">%1$s，%3$s 起 %2$d 分钟平均</string>
+    <string name="glow_metrics_average_from_time">%2$s 起 %1$d 分钟平均</string>
+    <string name="glow_metrics_unit_from_normal">%1$s，相对你的常态，当前 %2$s %1$s</string>
     <string name="glow_metrics_steps_hours">步，%1$s</string>
     <string name="glow_metrics_week_of">%1$s 当周</string>
     <string name="glow_metrics_related">相关指标</string>

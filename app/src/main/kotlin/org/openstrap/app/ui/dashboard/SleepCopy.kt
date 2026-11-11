@@ -8,6 +8,7 @@ import org.openstrap.app.data.History
 import org.openstrap.app.data.SleepEdits
 import org.openstrap.app.data.SleepHistory
 import org.openstrap.app.data.SleepRegularity
+import org.openstrap.app.data.HeartReadings
 import org.openstrap.app.i18n.Strings
 import org.openstrap.app.presentation.ChartPoint
 import org.openstrap.app.presentation.Ranges
@@ -47,16 +48,20 @@ internal object SleepCopy {
         else -> null
     }
 
-    /** The night's heart rate readings while asleep (5-minute averages). */
+    /** The night's heart rate readings while asleep (5-minute averages), for its line. */
     fun sleepHeart(state: DayUiState): List<ChartPoint> =
         state.sleep?.let { s -> state.sleepHeartRate.filter { it.x in s.start..s.end } }.orEmpty()
 
-    /** The lowest heart rate while asleep, and when. */
-    fun lowestHeart(state: DayUiState): ChartPoint? = sleepHeart(state).minByOrNull { it.y }
+    /** The night's stored heart rate readings while asleep, one a minute, for its lowest and mean. */
+    private fun sleepMinutes(state: DayUiState): List<Pair<Long, Int>> =
+        state.sleep?.let { s -> HeartReadings.within(state.sleepHeartMinutes, s.start, s.end) }.orEmpty()
 
-    /** The average heart rate while asleep: the strap's for the night, else the average of the readings. */
-    fun averageHeart(state: DayUiState): Int? =
-        state.sleep?.averageHeartRate ?: sleepHeart(state).takeIf { it.isNotEmpty() }?.map { it.y }?.average()?.roundToInt()
+    /** The lowest heart rate while asleep, and when: the lowest stored reading, not the lowest 5-minute average. */
+    fun lowestHeart(state: DayUiState): ChartPoint? =
+        HeartReadings.lowest(sleepMinutes(state))?.let { (t, bpm) -> ChartPoint(t, bpm.toFloat()) }
+
+    /** The average heart rate while asleep: the strap's for the night, else the mean of the stored readings. */
+    fun averageHeart(state: DayUiState): Int? = state.sleep?.averageHeartRate ?: HeartReadings.mean(sleepMinutes(state))
 
     /**
      * The signals the strap reads in your sleep. Wherever one shows, on any tab, in its detail or a related row, it's
@@ -123,8 +128,8 @@ internal object SleepCopy {
      */
     fun nightDaily(metric: Metric): DailyMetric = if (metric == Metric.Spo2) DailyMetric.SleepSpo2 else metric.daily
 
-    /** Whether [nightDaily] comes only from sleep (breathing rate, night blood oxygen), so Month and Year are nights too. */
-    fun dailyIsNightly(metric: Metric): Boolean = metric == Metric.Spo2 || metric == Metric.Breathing
+    /** Whether [nightDaily] comes only from sleep (breathing rate, night blood oxygen, HRV), so Month and Year are nights too. */
+    fun dailyIsNightly(metric: Metric): Boolean = metric == Metric.Spo2 || metric == Metric.Breathing || metric == Metric.Hrv
 
     /**
      * The label under a night-scoped value: "ms, average asleep", "ms, average of the last 7 nights". Month and Year say
@@ -176,8 +181,10 @@ internal object SleepCopy {
     /* -------------------------------------------- Sleep score ------------------------------------------- */
 
     /** The label under the score. */
-    fun scoreLabel(today: Boolean, strings: Strings = Strings.app): String =
-        strings.get(if (today) R.string.day_sleep_score_label_last_night else R.string.day_sleep_score_label_that_night)
+    fun scoreLabel(today: Boolean, adjusted: Boolean = false, strings: Strings = Strings.app): String {
+        val label = strings.get(if (today) R.string.day_sleep_score_label_last_night else R.string.day_sleep_score_label_that_night)
+        return if (adjusted) strings.format(R.string.day_sleep_score_label_adjusted, label) else label
+    }
 
     /** The Sleep score's state with no score: no sleep at all, or a night the strap didn't score. */
     fun noScore(hasSleep: Boolean, today: Boolean, strings: Strings = Strings.app): Pair<String, String> = when {

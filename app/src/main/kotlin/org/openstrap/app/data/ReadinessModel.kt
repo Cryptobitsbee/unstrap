@@ -137,7 +137,7 @@ private fun Recovery.hrvBalance(tonight: Night, base: Baseline?, hrv7: Float?): 
     val zNight = base.z(ln)
     val z = if (hrv7 != null) HRV_NIGHT_WEIGHT * zNight + HRV_WEEK_WEIGHT * base.z(hrv7) else zNight
     val pct = ((exp(ln - base.centre.toDouble()) - 1) * 100).toInt()
-    return Contributor(Factor.HrvBalance, scoreFromZ(deadZone(z)), Detail.Hrv(hrv.toInt(), pct))
+    return Contributor(Factor.HrvBalance, scoreFromZ(deadZone(z)), Detail.Hrv(Math.round(hrv), pct))
 }
 
 /** Resting heart rate: the night's lowest 30-minute average against baseline; lower is better. */

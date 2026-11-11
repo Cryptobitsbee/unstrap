@@ -58,6 +58,9 @@
     <string name="glow_today_last_night_scored">%1$s，睡眠 %2$s</string>
     <string name="glow_today_heart_rate">心率</string>
     <string name="glow_today_resting">静息 %1$d</string>
+    <string name="glow_today_resting_estimated">静息 %1$d 估算</string>
+    <string name="glow_today_body_estimated">%1$s，估算</string>
+    <string name="glow_today_stress_latest">最新于 %1$s</string>
     <string name="glow_today_steps_title">步数</string>
     <string name="glow_today_steps_goal">目标 %1$s</string>
     <string name="glow_today_this_morning">今晨</string>

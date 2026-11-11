@@ -175,6 +175,24 @@ private fun metric(
     suffix: String = "",
 ) = row(strings.get(name), color, value?.let { m.format(it) + suffix }, strings.get(status), IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS)))
 
+/**
+ * Skin temperature's row: once there's a normal, the night's change from it with the level in the status line, as the
+ * Sleep tab and the detail lead with it; before that, the night's average.
+ */
+private fun skinTemperatureRow(state: DayUiState, strings: Strings): IndexRow {
+    val m = Metric.SkinTemperature
+    val v = SleepCopy.nightValue(state, m)
+    val normal = SleepCopy.nightNormal(state, m)
+    val name = strings.get(R.string.glow_metrics_skin_temperature)
+    val target = IndexTarget.Open(Detail.OfMetric(m, m in SleepCopy.NIGHT_SIGNALS))
+    return if (v != null && normal != null) {
+        val unitLine = strings.format(R.string.glow_metrics_unit_from_normal, m.unit, m.format(v))
+        row(name, MetricColors.temperature, m.formatChange(v - normal.mean), unitLine, target)
+    } else {
+        row(name, MetricColors.temperature, v?.let { m.format(it) }, strings.get(R.string.glow_metrics_night_average), target)
+    }
+}
+
 /** The index's Heart and Body signals groups, a row for each of their metrics. */
 private fun signalGroups(state: DayUiState, strings: Strings): List<IndexGroup> = listOf(
     IndexGroup(
@@ -184,9 +202,10 @@ private fun signalGroups(state: DayUiState, strings: Strings): List<IndexGroup> 
                 strings, Metric.HeartRate, R.string.glow_metrics_heart_rate, MetricColors.heart, state.latestHeartRate?.toFloat(),
                 R.string.glow_metrics_latest_reading,
             ),
+            // Our own estimate says so when the strap sent none for the day.
             metric(
-                strings, Metric.RestingHr, R.string.glow_metrics_resting_heart_rate, MetricColors.heart,
-                state.restingHeartRate?.toFloat(), R.string.glow_metrics_for_the_day,
+                strings, Metric.RestingHr, R.string.glow_metrics_resting_heart_rate, MetricColors.heart, state.restingHeartRate?.toFloat(),
+                if (state.restingEstimated) R.string.glow_metrics_for_the_day_estimated else R.string.glow_metrics_for_the_day,
             ),
             metric(
                 strings, Metric.Hrv, R.string.glow_metrics_hrv, MetricColors.hrv, SleepCopy.nightValue(state, Metric.Hrv),
@@ -202,10 +221,7 @@ private fun signalGroups(state: DayUiState, strings: Strings): List<IndexGroup> 
                 strings, Metric.Spo2, R.string.glow_metrics_blood_oxygen, MetricColors.spo2, SleepCopy.nightValue(state, Metric.Spo2),
                 R.string.glow_metrics_night_average, suffix = "%",
             ),
-            metric(
-                strings, Metric.SkinTemperature, R.string.glow_metrics_skin_temperature, MetricColors.temperature,
-                SleepCopy.nightValue(state, Metric.SkinTemperature), R.string.glow_metrics_night_average,
-            ),
+            skinTemperatureRow(state, strings),
             metric(
                 strings, Metric.Breathing, R.string.glow_metrics_breathing_rate, MetricColors.sleepLight,
                 SleepCopy.nightValue(state, Metric.Breathing), R.string.glow_metrics_night_average,

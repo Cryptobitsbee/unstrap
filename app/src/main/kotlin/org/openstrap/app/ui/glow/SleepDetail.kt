@@ -50,6 +50,7 @@ import org.openstrap.app.data.Recovery
 import org.openstrap.app.data.RecoveryResult
 import org.openstrap.app.data.SleepEdits
 import org.openstrap.app.data.SleepHistory
+import org.openstrap.app.data.HeartReadings
 import org.openstrap.app.data.Summaries
 import org.openstrap.app.data.db.SleepSession
 import org.openstrap.app.data.wasoMinutes
@@ -160,7 +161,9 @@ internal fun SleepScoreDetail(
             DetailHeadline(Math.round(known.average()).toString(), stringResource(R.string.glow_sleep_week_average), null)
         range == Range.Week ->
             DetailHeadline.none(stringResource(R.string.glow_sleep_no_scores), stringResource(R.string.glow_sleep_in_last_7_nights))
-        score != null -> DetailHeadline(score.toString(), SleepCopy.scoreLabel(isToday), TabCopy.sleepScoreWord(score))
+        score != null -> DetailHeadline(
+            score.toString(), SleepCopy.scoreLabel(isToday, state.sleepScoreAdjusted), TabCopy.sleepScoreWord(score),
+        )
         session == null && state.deletedSleep != null ->
             DetailHeadline.none(stringResource(R.string.glow_sleep_no_score), SleepCopy.noScoreDeleted(isToday))
         else -> SleepCopy.noScore(session != null, isToday).let { (word, why) -> DetailHeadline.none(word, why) }
@@ -438,7 +441,12 @@ private fun NightLines(state: DayUiState, window: LongRange, onScrub: (DetailHea
         if (hr.isNotEmpty()) {
             ChartTitle(
                 stringResource(R.string.glow_sleep_heart_rate),
-                stringResource(R.string.glow_sleep_heart_note, hr.minOf { it.y }.toInt(), hr.map { it.y }.average().toInt()),
+                // The lowest stored reading and the night's average, as the Sleep tab says them; not the line's 5-minute averages.
+                stringResource(
+                    R.string.glow_sleep_heart_note,
+                    SleepCopy.lowestHeart(state)?.y?.let(Math::round) ?: Math.round(hr.minOf { it.y }),
+                    SleepCopy.averageHeart(state) ?: Math.round(hr.map { it.y }.average()).toInt(),
+                ),
                 scrubbed = hrAt,
             )
             ScrubLine(hr, window, 130.dp, labels, MetricColors.heart, stringResource(R.string.glow_unit_bpm)) { hrAt = it; onScrub(it) }
@@ -630,6 +638,9 @@ internal fun NapsDetail(
                             // The strap sends no average for a nap, so its heart rate is the day's readings in its window.
                             val window = nap.start..nap.end
                             val hr = remember(state.heartRate, window) { state.heartRate.filter { it.x in window } }
+                            val minutes = remember(state.heartMinutes, window) {
+                                HeartReadings.within(state.heartMinutes, window.first, window.last)
+                            }
                             if (hr.isNotEmpty()) {
                                 Box(Modifier.padding(top = 16.dp)) {
                                     ScrubLine(
@@ -637,7 +648,12 @@ internal fun NapsDetail(
                                         stringResource(R.string.glow_unit_bpm),
                                     ) { scrub = it }
                                 }
-                                Caption(SleepCopy.napHeart(hr.minOf { it.y }.toInt(), hr.map { it.y }.average().toInt()), Modifier.padding(top = 6.dp, bottom = 8.dp))
+                                // The nap's lowest and average from the stored readings, not the line's averages.
+                                val low = HeartReadings.lowest(minutes)?.second
+                                val average = HeartReadings.mean(minutes)
+                                if (low != null && average != null) {
+                                    Caption(SleepCopy.napHeart(low, average), Modifier.padding(top = 6.dp, bottom = 8.dp))
+                                }
                             }
                         }
                     }

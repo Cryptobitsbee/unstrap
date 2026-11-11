@@ -120,6 +120,12 @@
     <string name="glow_today_heart_rate">Heart rate</string>
     <!-- The heart rate card's note on its title row: today's resting heart rate. -->
     <string name="glow_today_resting">Resting <xliff:g id="bpm" example="58">%1$d</xliff:g></string>
+    <!-- The same when the strap sent none and unstrap estimated it. Short, it shares the row with the title. -->
+    <string name="glow_today_resting_estimated" tools:ignore="PluralsCandidate">Resting <xliff:g id="bpm" example="58">%1$d</xliff:g> est.</string>
+    <!-- Under a body list value unstrap estimated itself (the day's resting heart rate), after the word against your normal. -->
+    <string name="glow_today_body_estimated"><xliff:g id="word" example="Within normal">%1$s</xliff:g>, estimated</string>
+    <!-- Under the stress number on Today's card: it is the latest reading, and when it was taken. -->
+    <string name="glow_today_stress_latest">Latest at <xliff:g id="time" example="14:05">%1$s</xliff:g></string>
     <!-- Title of the steps card. -->
     <string name="glow_today_steps_title">Steps</string>
     <!-- The steps card's note on its title row: your daily goal. -->

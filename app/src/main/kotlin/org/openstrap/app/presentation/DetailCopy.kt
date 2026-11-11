@@ -88,16 +88,21 @@ internal object DetailCopy {
 
     /**
      * The label under the value: what the number is for the range. "bpm now", "ms, day average", "steps, average of
-     * the last 7 days". [live] is heart rate read live this minute.
+     * the last 7 days". [live] is heart rate read live this minute, [estimated] a resting heart rate unstrap worked out itself.
      */
-    fun valueLabel(metric: Metric, range: Range, live: Boolean = false, today: Boolean = true, strings: Strings = Strings.app): String {
+    fun valueLabel(
+        metric: Metric, range: Range, live: Boolean = false, today: Boolean = true, estimated: Boolean = false,
+        strings: Strings = Strings.app,
+    ): String {
         val unit = metric.unit
         // One string with the unit and one without, so a translator writes the capital rather than the code adding it.
         fun with(bare: Int, withUnit: Int) = if (unit.isEmpty()) strings.get(bare) else strings.format(withUnit, unit)
         return when (range) {
             Range.Day -> when (metric) {
                 Metric.HeartRate -> strings.get(if (live) R.string.core_detail_label_bpm_now else R.string.core_detail_label_bpm_latest)
-                Metric.RestingHr -> strings.get(R.string.core_detail_label_bpm_resting)
+                Metric.RestingHr -> strings.get(
+                    if (estimated) R.string.core_detail_label_bpm_resting_estimated else R.string.core_detail_label_bpm_resting,
+                )
                 Metric.Steps -> strings.get(if (today) R.string.core_detail_label_steps_today else R.string.core_detail_label_steps)
                 Metric.Breathing -> strings.get(R.string.core_detail_label_breathing)
                 else -> with(R.string.core_detail_label_day_average, R.string.core_detail_label_unit_day_average)

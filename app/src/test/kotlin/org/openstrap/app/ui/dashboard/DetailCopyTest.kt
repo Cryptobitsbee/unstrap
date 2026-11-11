@@ -111,6 +111,8 @@ class DetailCopyTest {
         assertEquals("bpm now", DetailCopy.valueLabel(Metric.HeartRate, Range.Day, live = true))
         assertEquals("ms, day average", DetailCopy.valueLabel(Metric.Hrv, Range.Day))
         assertEquals("Day average", DetailCopy.valueLabel(Metric.Stress, Range.Day))
+        assertEquals("bpm resting", DetailCopy.valueLabel(Metric.RestingHr, Range.Day))
+        assertEquals("bpm resting, estimated", DetailCopy.valueLabel(Metric.RestingHr, Range.Day, estimated = true))
         assertEquals("steps a day, last 7 days", DetailCopy.valueLabel(Metric.Steps, Range.Week))
         assertEquals("ms, average of the last 30 days", DetailCopy.valueLabel(Metric.Hrv, Range.Month))
     }
@@ -130,6 +132,7 @@ class DetailCopyTest {
     @Test fun `no detail sentence uses an interpunct, semicolon or em dash`() {
         val lines = listOfNotNull(
             DetailCopy.day(0, DaySource.Night, true, 30), DetailCopy.heartDay(1, 2, false), DetailCopy.year("1", "2", "ms"),
+            DetailCopy.valueLabel(Metric.RestingHr, Range.Day, estimated = true),
             DetailCopy.span(Range.Month, listOf(Level.Above, Level.Above), false, true, 30), DetailCopy.scoreWeek(listOf(1, 2)),
             DetailCopy.charge(1, 2, 1, true, false, 3), DetailCopy.learningNormal(1, true), DetailCopy.bandLabel(normal) { it.toString() },
         ) + Metric.entries.flatMap { m -> Range.entries.map { DetailCopy.valueLabel(m, it) } }

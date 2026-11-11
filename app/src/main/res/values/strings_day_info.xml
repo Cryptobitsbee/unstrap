@@ -57,14 +57,14 @@
     <!-- Resting heart rate's sheet. -->
     <string name="day_info_resting_hr_name">Resting heart rate</string>
     <string name="day_info_resting_hr_meaning">Your heart rate at its calmest. Lower usually means a fitter, well rested heart.</string>
-    <string name="day_info_resting_hr_how">The strap calculates it each day from your calmest stretch, usually in sleep. Your normal is the middle of your last 30 days, give or take a usual spread, once 7 of them have a value.</string>
+    <string name="day_info_resting_hr_how">Normally it\'s the strap\'s own figure for the day, from your calmest stretch, usually in sleep. When the strap sent none, unstrap estimates it from the calmest half hour of the day, and says so. Your normal is the middle of your last 30 days, give or take a usual spread, once 7 of them have a value.</string>
     <string name="day_info_resting_hr_moves">It rises after hard training, late meals, alcohol, poor sleep or when your body is fighting something off, and falls as fitness builds.</string>
     <string name="day_info_resting_hr_off">A night with the strap loose or off gives it less to go on. One high day says less than a few in a row.</string>
 
     <!-- Heart rate variability's sheet. HRV is the short name shown on cards. -->
     <string name="day_info_hrv_name">HRV</string>
     <string name="day_info_hrv_meaning">Heart rate variability, the small changes in time between heartbeats. Higher than your normal often means your body is well recovered.</string>
-    <string name="day_info_hrv_how">The strap measures the time between beats, in milliseconds (ms), while you\'re still, mostly in sleep, and the day\'s value is the average of its readings. It\'s read against your own normal: the middle of your last 30 days, give or take a usual spread.</string>
+    <string name="day_info_hrv_how">The strap measures the time between beats, in milliseconds (ms), while you\'re still, mostly in sleep. The figure is the average of its readings through your sleep, to the nearest ms. It\'s read against your own normal: the middle of your last 30 days, give or take a usual spread.</string>
     <string name="day_info_hrv_moves">Good sleep and rest raise it. Stress, hard training and alcohol lower it. Compare it with your own normal, not other people\'s.</string>
     <string name="day_info_hrv_off">Moving during a reading, a loose strap or a short night leave fewer clean readings. HRV swings a lot from day to day, so a few days in a row say more than one.</string>
 
@@ -92,7 +92,7 @@
     <!-- Breathing rate's sheet. -->
     <string name="day_info_breathing_name">Breathing rate</string>
     <string name="day_info_breathing_meaning">How many breaths you take a minute while asleep. It stays very steady for most people.</string>
-    <string name="day_info_breathing_how">The strap measures it during sleep, so there\'s one value a night, read against your normal of the last 30 days.</string>
+    <string name="day_info_breathing_how">The strap measures it through your sleep, and the figure is the average of those readings, read against your normal of the last 30 days.</string>
     <string name="day_info_breathing_moves">It can rise above your normal after a hard training day, in a warm, stuffy room, or when your body is fighting something off.</string>
     <string name="day_info_breathing_off">A restless night, or the strap off for part of it, leaves fewer readings to go on.</string>
 

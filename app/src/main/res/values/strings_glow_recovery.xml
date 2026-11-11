@@ -43,6 +43,8 @@
     <string name="glow_recovery_blood_oxygen">Blood oxygen</string>
     <!-- A row in the body signals list. -->
     <string name="glow_recovery_stress">Stress</string>
+    <!-- Under the stress value in the body signals list: its word against your normal, then that the number is the day's average. -->
+    <string name="glow_recovery_stress_average"><xliff:g id="word" example="Within usual">%1$s</xliff:g>, day average</string>
     <!-- Title of the body signals list. -->
     <string name="glow_recovery_body_signals">Body signals</string>
     <!-- The note on the body signals' title row: each is compared with your normal. -->

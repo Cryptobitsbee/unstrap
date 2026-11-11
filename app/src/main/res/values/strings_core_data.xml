@@ -22,7 +22,7 @@
     <!-- Recovery score detail, under breathing rate: the change from your usual in breaths a minute, signed. -->
     <string name="core_data_recovery_breathing"><xliff:g id="change" example="−0.4">%1$s</xliff:g>/min vs usual</string>
     <!-- Recovery score detail, under blood oxygen: the night's average percent, then the change from your usual, signed. -->
-    <string name="core_data_recovery_blood_oxygen"><xliff:g id="percent" example="96.3">%1$s</xliff:g>%%, <xliff:g id="change" example="−1.2">%2$s</xliff:g> vs usual</string>
+    <string name="core_data_recovery_blood_oxygen"><xliff:g id="percent" example="96">%1$s</xliff:g>%%, <xliff:g id="change" example="−1.2">%2$s</xliff:g> vs usual</string>
     <!-- Recovery score detail, under Load: yesterday's Load and your usual. -->
     <string name="core_data_recovery_load">Load <xliff:g id="yesterday" example="62">%1$s</xliff:g>, usual <xliff:g id="usual" example="45">%2$s</xliff:g></string>
 
