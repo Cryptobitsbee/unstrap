@@ -121,9 +121,18 @@ class AutoBackup(
         var written = false
         try {
             (resolver.openOutputStream(temp.uri, "w") ?: throw Failed(BackupFailure.CantWrite)).use { backups.writeZip(it) }
-            // A second run on the same day replaces the first.
-            dir.findFile(name)?.delete()
-            if (!temp.renameTo(name)) copyAs(dir, temp, name)
+            // A second run on the same day replaces the first, but only once the new one is in place: the old one is
+            // moved aside, and put back if the new one can't be written.
+            val previous = dir.findFile(name)
+            val aside = BackupFiles.asideName(today)
+            if (previous != null && !previous.renameTo(aside)) throw Failed(BackupFailure.CantWrite)
+            try {
+                if (!temp.renameTo(name)) copyAs(dir, temp, name)
+            } catch (e: Throwable) {
+                if (previous != null) runCatching { dir.findFile(aside)?.renameTo(name) }
+                throw e
+            }
+            dir.findFile(aside)?.let(::deleteQuietly)
             written = true
         } finally {
             // Failed or cancelled part way: the temp copy goes, and the failure itself is what's reported.
