@@ -32,6 +32,8 @@ internal class SavedWorkoutEditor(
     private val scope: CoroutineScope,
     /** The route and step totals still in memory for the workout [start] (the last one recorded), else null. */
     private val track: (start: Long) -> WorkoutDistance.Track? = { null },
+    /** The workout [start] was deleted, with all it was recorded over, [from] to [to]: auto sync takes it out of Health Connect. */
+    private val onRemoved: (start: Long, from: Long, to: Long) -> Unit = { _, _, _ -> },
 ) {
     /**
      * Deletes a phone workout, and closes its summary if it is the one showing. The strap's own records of it
@@ -44,7 +46,10 @@ internal class SavedWorkoutEditor(
                 // One transaction: not deleted, nothing is, its summary stays, and Discard can be tried again.
                 val w = catching { dao.discardAppWorkout(start, clock()) }
                     .onFailure { log("workout not discarded: ${it.message}") }.getOrElse { return@withLock }
-                if (w?.end != null) refreshDays(w.start, w.recordedEnd ?: w.end)
+                if (w?.end != null) {
+                    refreshDays(w.start, w.recordedEnd ?: w.end)
+                    onRemoved(w.start, w.start, w.recordedEnd ?: w.end)
+                }
                 onDiscarded(start)
             }
         }
