@@ -32,12 +32,17 @@ sealed interface AlarmsRead {
 data class AlarmsUiState(
     /**
      * Loading until the first read ends. Failed means no read has ever worked, so [caps] and [alarms] are unknown and the
-     * screen must not show them as "no alarms". Once Loaded it stays Loaded: a later failed read only sets [error].
+     * screen must not show them as "no alarms". Once Loaded it stays Loaded: a later failed read only sets [alarmsError].
      */
     val read: AlarmsRead = AlarmsRead.Loading,
     /** A write is in flight; controls are disabled meanwhile. */
     val busy: Boolean = false,
+    /** A failed write's reason. */
     val error: String? = null,
+    /** Why the alarms read failed, if it did; shown on the Alarms page only. */
+    val alarmsError: String? = null,
+    /** Why the health settings read failed, if it did; shown on the Health page only. */
+    val healthError: String? = null,
     val caps: AlarmCapabilities? = null,
     val alarms: List<Alarm> = emptyList(),
     val health: SettingsGroup? = null,
@@ -155,25 +160,32 @@ class AlarmsViewModel(private val strap: StrapController) : ViewModel() {
         }
     }
 
-    /** Re-reads alarms and health from the strap. [error] is the failed write's reason, if any, and wins over a read failure's. */
+    /**
+     * Re-reads alarms and health from the strap, each on its own so one failing doesn't hide the other. [error] is the
+     * failed write's reason, if any; a read failure is kept apart from it ([AlarmsUiState.alarmsError], [AlarmsUiState.healthError]).
+     */
     private suspend fun readAll(error: String?) {
         // The raw failure goes to Diagnostics, and the screen says it in plain words ([ErrorCopy.strap]).
-        val read = catching {
+        val alarmsRead = catching {
             val (caps, alarms) = strap.readAlarms()
-            Triple(caps, alarms.sortedWith(compareBy({ it.hour }, { it.minute })), strap.readHealthSettings())
+            caps to alarms.sortedWith(compareBy({ it.hour }, { it.minute }))
         }.onFailure { (strap as? StrapManager)?.log("alarms: read from the strap failed: $it") }
+        val healthRead = catching { strap.readHealthSettings() }
+            .onFailure { (strap as? StrapManager)?.log("alarms: health settings read from the strap failed: $it") }
         _state.update { s ->
-            read.fold(
-                { (caps, alarms, health) ->
-                    s.copy(read = AlarmsRead.Loaded, busy = false, error = error, caps = caps, alarms = alarms, health = health)
-                },
+            val withAlarms = alarmsRead.fold(
+                { (caps, alarms) -> s.copy(read = AlarmsRead.Loaded, caps = caps, alarms = alarms, alarmsError = null) },
                 { e ->
-                    val failed = error ?: ErrorCopy.strap(e, Strings.app.get(R.string.you_alarms_read_failed))
+                    val failed = ErrorCopy.strap(e, Strings.app.get(R.string.you_alarms_read_failed))
                     // Without an earlier good read there is nothing to show; with one, keep showing it beside the error.
-                    val next = if (s.read is AlarmsRead.Loaded) s.read else AlarmsRead.Failed(failed)
-                    s.copy(read = next, busy = false, error = failed)
+                    s.copy(read = if (s.read is AlarmsRead.Loaded) s.read else AlarmsRead.Failed(failed), alarmsError = failed)
                 },
             )
+            // A failed re-read keeps the last good settings.
+            healthRead.fold(
+                { health -> withAlarms.copy(health = health, healthError = null) },
+                { e -> withAlarms.copy(healthError = ErrorCopy.strap(e, Strings.app.get(R.string.you_alarms_read_failed))) },
+            ).copy(busy = false, error = error)
         }
     }
 }
