@@ -649,6 +649,53 @@ class WorkoutSessionTest {
     }
 
     @Test
+    fun aGpsRunLeftRecordingWithNoHeartRateEndsAtItsLastRoutePoint() {
+        // The strap was off: a 20 minute run with its route kept and no heart rate, and the app back five hours on.
+        val t0 = clock.now - 5 * 3600
+        runBlocking {
+            db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1, useGps = true, keepRoute = true))
+            db.healthDao().insertRoutePoints(
+                (0..1200 step 5).map { AppWorkoutRoutePoint.of(t0, org.openstrap.app.data.Route.Point(t0 + it, 51.5 + it * 1e-5, -0.1, 5f)) },
+            )
+        }
+        val s = session(leftWaitMs = SHORT_WAIT_MS)
+        s.restore()
+        assertEquals(WorkoutState.Ended(t0), s.state.await { it is WorkoutState.Ended })
+        val saved = stored(t0)!!
+        assertEquals(t0 + 1200, saved.end)
+        assertEquals(241, runBlocking { db.healthDao().routeOnce(t0) }.size)
+    }
+
+    @Test
+    fun aWorkoutLeftRecordingWithNothingStoredRecordsOnInsteadOfBeingDeleted() {
+        val t0 = clock.now - 5 * 3600
+        runBlocking { db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1)) }
+        val s = session(leftWaitMs = SHORT_WAIT_MS)
+        s.restore()
+        s.restored.await { it }
+        // Past the wait, with nothing from the strap: still there and still recording, for the wearer to end.
+        runBlocking { delay(SHORT_WAIT_MS * 3) }
+        assertEquals(t0, s.recording().workout.start)
+        assertNull(stored(t0)!!.end)
+        // End tapped then ends it where it was recorded to, not by deleting it.
+        s.end()
+        assertEquals(WorkoutState.Ended(t0), s.state.await { it is WorkoutState.Ended })
+        assertEquals(clock.now, stored(t0)!!.end)
+    }
+
+    @Test
+    fun aWorkoutLeftPausedWithNothingStoredComesBackPaused() {
+        val t0 = clock.now - 5 * 3600
+        runBlocking { db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = null, sportType = 1, pausedAt = t0 + 30)) }
+        val s = session()
+        s.restore()
+        s.restored.await { it }
+        val r = s.recording()
+        assertTrue(r.paused)
+        assertNull(stored(t0)!!.end)
+    }
+
+    @Test
     fun aRestartAddsToTheDistanceStoredBeforeIt() {
         val settings = SettingsStore(context)
         runBlocking { settings.saveProfile(profile()) }
@@ -834,6 +881,28 @@ class WorkoutSessionTest {
         s.end()
         s.state.await { it is WorkoutState.Ended }
         assertNotNull(stored(t0)?.end)
+    }
+
+    @Test
+    fun aRestDoesNotEndWhilePausedAndEndsOnceResumed() {
+        val s = session()
+        s.start(sportType = 1)
+        s.startSet()
+        s.recording { it.inSet }
+        clock.advance(Duration.ofSeconds(40))
+        s.setDone()
+        s.recording { it.restUntil != null }
+        s.pause()
+        s.recording { it.paused }
+        // Well past the 90 s rest, paused: the once a second check leaves it alone.
+        clock.advance(Duration.ofSeconds(120))
+        runBlocking { delay(2_500) }
+        val paused = s.recording()
+        assertNotNull(paused.restUntil)
+        assertNull(paused.sets.last().restEnd)
+        s.resume()
+        val resumed = s.recording { it.restUntil == null }
+        assertEquals(clock.now, resumed.sets.last().restEnd)
     }
 
     @Test
