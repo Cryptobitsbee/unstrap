@@ -420,8 +420,11 @@ class HistorySync internal constructor(
             val headerTime = chunk.headerTime
             val payload = chunk.payload
             // The size field counts records, not bytes (activity: size 4 = four 8-byte minutes).
+            // A chunk it can't read ends the type as before, and the type fails, so a stop here shows instead of
+            // the sync saying Done while this type gets no further. What goes to the strap is the same.
             val unit = chunk.unit ?: run {
                 log("history ${spec.type}: got ${payload.size} bytes for size ${chunk.sizeField}, not read")
+                ok = false
                 break@loop
             }
             log(
@@ -433,6 +436,7 @@ class HistorySync internal constructor(
             // Zepp parses after the ACK and tells the strap nothing of a parse failure.
             if (result is ParseResult.Failure) {
                 log("history ${spec.type}: parse failed: ${result.reason}")
+                ok = false
                 break@loop
             }
             val records = (result as ParseResult.Success).records
@@ -492,13 +496,17 @@ class HistorySync internal constructor(
     /**
      * Workouts as Zepp's `pxk`: the summary, then its detail from the same cursor (04 §3.16), the next pair from the
      * summary's header + 1 s. The pairs are stored when the loop ends, then the cursor goes to the last workout + 1 s
-     * (at most now) for both 5 and 6. A failed detail fails the job and stores nothing, so the cursor stays.
+     * (at most now) for both 5 and 6. A failed detail fails the job and stores nothing, so the cursor stays, as Zepp's
+     * receiver drops what a failed job fetched. A summary that can't be read is left out and the loop goes on, as
+     * Zepp's, which only parses once it ends: the type fails so it shows, and the cursor passes it once a later one
+     * is stored.
      */
     // Each return or break ends the loop for a reason of its own.
     @Suppress("ReturnCount", "LoopWithTooManyJumpStatements")
     private suspend fun syncWorkouts(spec: HistoryTypeSpec): Boolean {
         var cursor = startOf(spec.type, System.currentTimeMillis() / 1000)
         val pairs = mutableListOf<WorkoutFetch.Workout>()
+        var unreadable = 0
         while (true) {
             if (fastRecharge) return false
             when (val w = client.fetchWorkout(cursor, zone)) {
@@ -508,6 +516,13 @@ class HistorySync internal constructor(
                     if (w.fastRecharge) fastRecharge = true
                     return false
                 }
+                // Left out, and the ones after it still come: the type fails, so it shows, but nothing is held up.
+                is WorkoutFetch.Unreadable -> {
+                    log("history workout from ${Instant.ofEpochSecond(w.nextCursor - 1)}: ${w.reason}, left out")
+                    unreadable++
+                    if (w.nextCursor <= cursor) break
+                    cursor = w.nextCursor
+                }
                 is WorkoutFetch.Workout -> {
                     if (w.retryDetail) { log("history workout: detail failed, nothing stored"); return false }
                     pairs += w
@@ -516,14 +531,14 @@ class HistorySync internal constructor(
                 }
             }
         }
-        if (pairs.isEmpty()) return true
+        if (pairs.isEmpty()) return unreadable == 0
         for (w in pairs) storeWorkout(w)
         val now = System.currentTimeMillis() / 1000
         val last = pairs.maxOf { it.summary.trackId } + 1
         val saved = if (last > now) now else last
         save(HistoryDataType.SPORT_SUMMARY, saved, now)
         save(HistoryDataType.SPORT_DETAIL, saved, now)
-        return true
+        return unreadable == 0
     }
 
     private suspend fun storeWorkout(w: WorkoutFetch.Workout) {
