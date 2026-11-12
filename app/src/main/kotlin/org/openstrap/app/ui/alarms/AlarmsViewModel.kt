@@ -154,7 +154,8 @@ class AlarmsViewModel(private val strap: StrapController) : ViewModel() {
             refreshPending = false
             if (again) {
                 _state.update { it.copy(busy = true) }
-                readAll(null)
+                // The write's reason stays up: the queued read isn't what the user is waiting to hear about.
+                readAll(error)
             }
             error == null
         }
