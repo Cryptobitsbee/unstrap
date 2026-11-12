@@ -114,6 +114,22 @@ class GdspClientTest {
     }
 
     @Test
+    fun anUnreadableSummaryIsLeftOutAndTheNextOneStillComes() = runTest {
+        val odd = trackId - 3600
+        // Version 1, not protobuf: fetched whole, but not read.
+        val strap = SimulatedGdspStrap(
+            mapOf(odd to (byteArrayOf(1, 0, 0, 0) to fixture("detail_6.bin")), trackId to (fixture("summary_5.bin") to fixture("detail_6.bin"))),
+        )
+        val client = GdspClient(strap::send, strap.control, strap.data)
+        val u = client.fetchWorkout(odd - 60, zone) as WorkoutFetch.Unreadable
+        assertEquals(odd + 1, u.nextCursor)
+        // Its detail is asked for too, as Zepp does, so the traffic is the same.
+        assertEquals(listOf(5 to odd - 60, 6 to odd - 60), strap.starts)
+        val w = client.fetchWorkout(u.nextCursor, zone) as WorkoutFetch.Workout
+        assertEquals(trackId, w.summary.trackId)
+    }
+
+    @Test
     fun fastRechargeIsAcknowledgedWith33() = runTest {
         val strap = strap().apply { fastRecharge = true }
         val client = GdspClient(strap::send, strap.control, strap.data)

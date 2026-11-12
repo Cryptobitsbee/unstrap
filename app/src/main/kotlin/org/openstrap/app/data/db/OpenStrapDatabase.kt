@@ -55,7 +55,7 @@ import java.time.ZoneId
         BadgeRow::class,
         WeekResult::class,
     ],
-    version = 31,
+    version = 32,
     autoMigrations = [
         AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4),
         AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6),
@@ -81,7 +81,7 @@ abstract class OpenStrapDatabase : RoomDatabase() {
          * converted ([DayKeyMigration]), so it is the phone's zone when the database first opens after the upgrade.
          */
         fun migrations(zone: () -> ZoneId = ZoneId::systemDefault): Array<Migration> =
-            arrayOf(WorkoutsMigration, IndicesMigration, DayKeyMigration(zone), MinuteSleepMigration)
+            arrayOf(WorkoutsMigration, IndicesMigration, DayKeyMigration(zone), MinuteSleepMigration, OrphanSleepEditMigration)
 
         /** [migrations] in the phone's zone. */
         val MIGRATIONS = migrations()

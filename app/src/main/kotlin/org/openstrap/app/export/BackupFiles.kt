@@ -16,13 +16,16 @@ object BackupFiles {
     // Before the app was renamed unstrap its backups were "OpenStrap-backup-<date>". Both stay ours, so old backups are
     // still found, kept in the count and deleted in turn.
     private val BACKUP = Regex("""^(?:unstrap|OpenStrap)-backup-(\d{4}-\d{2}-\d{2})\.zip$""")
-    private val TEMP = Regex("""^(?:unstrap|OpenStrap)-backup-\d{4}-\d{2}-\d{2}\.part$""")
+    private val TEMP = Regex("""^(?:unstrap|OpenStrap)-backup-\d{4}-\d{2}-\d{2}(?:-previous)?\.part$""")
 
     /** "unstrap-backup-2026-10-29.zip". */
     fun name(date: LocalDate): String = "unstrap-backup-$date.zip"
 
     /** The name a backup is written under until it is complete. Not .zip, so no provider adds an extension to it. */
     fun tempName(date: LocalDate): String = "unstrap-backup-$date.part"
+
+    /** The name the earlier backup of the same day waits under while its replacement is put in place. Counts as a temp. */
+    fun asideName(date: LocalDate): String = "unstrap-backup-$date-previous.part"
 
     /** The day a backup file was made, or null when [name] isn't one of ours. */
     fun dateOf(name: String): LocalDate? =

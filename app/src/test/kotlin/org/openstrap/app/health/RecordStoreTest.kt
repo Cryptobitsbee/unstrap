@@ -1,9 +1,12 @@
 package org.openstrap.app.health
 
+import androidx.health.connect.client.records.DistanceRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.metadata.Metadata
 import androidx.health.connect.client.time.TimeRangeFilter
+import androidx.health.connect.client.units.Length
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.sync.Mutex
@@ -106,5 +109,43 @@ class RecordStoreTest {
         val writers = List(4) { async { slow.writeSerially(lock, one, listOf(SleepSessionRecord::class to range)) } }
         writers.awaitAll()
         assertTrue(!overlapped)
+    }
+
+    private val device = androidx.health.connect.client.records.metadata.Device(type = 0)
+
+    private fun session(start: Long, id: String, recordId: String) = ExerciseSessionRecord(
+        startTime = Instant.ofEpochSecond(start), startZoneOffset = ZoneOffset.UTC,
+        endTime = Instant.ofEpochSecond(start + 1800), endZoneOffset = ZoneOffset.UTC,
+        exerciseType = ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,
+        metadata = Metadata.autoRecorded(device = device, clientRecordId = id),
+    ).also { setId(it.metadata, recordId) }
+
+    private fun distance(start: Long, id: String, recordId: String) = DistanceRecord(
+        startTime = Instant.ofEpochSecond(start), startZoneOffset = ZoneOffset.UTC,
+        endTime = Instant.ofEpochSecond(start + 1800), endZoneOffset = ZoneOffset.UTC,
+        distance = Length.meters(5000.0), metadata = Metadata.autoRecorded(device = device, clientRecordId = id),
+    ).also { setId(it.metadata, recordId) }
+
+    private fun setId(metadata: Metadata, recordId: String) {
+        Metadata::class.java.getDeclaredField("id").apply { isAccessible = true }.set(metadata, recordId)
+    }
+
+    @Test fun `a deleted phone workout takes its session and distance out, and no other`() = runTest {
+        val store = FakeStore(
+            listOf(
+                session(1000, "openstrap:workout:1000", "a"), distance(1000, "openstrap:distance:1000", "b"),
+                session(9000, "openstrap:workout:9000", "c"), distance(9000, "openstrap:distance:9000", "d"),
+                session(1000, "openstrap:strapworkout:1000", "e"),
+            ),
+        )
+        store.dropPhoneWorkout(1000, 1000, 2800)
+        assertEquals(listOf("c", "d", "e"), store.records.map { it.metadata.id })
+    }
+
+    @Test fun `a deleted phone workout stays when its records can't be read`() = runTest {
+        val held = listOf(session(1000, "openstrap:workout:1000", "a"))
+        val store = FakeStore(held, readable = false)
+        store.dropPhoneWorkout(1000, 1000, 2800)
+        assertEquals(held, store.records)
     }
 }

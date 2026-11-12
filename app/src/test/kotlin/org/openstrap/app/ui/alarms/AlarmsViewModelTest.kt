@@ -53,7 +53,8 @@ class AlarmsViewModelTest {
         val vm = AlarmsViewModel(failingStrap(failure)).also { models += it }
         val state = vm.state.value
         assertFalse(state.loading)
-        return state.error
+        // A failed read is the Alarms page's own error, apart from a failed write's.
+        return state.alarmsError
     }
 
     /** A strap whose alarm read fails with [failure]. Everything else answers empty. */
@@ -116,17 +117,54 @@ class AlarmsViewModelTest {
         assertEquals("Slot taken", vm.state.value.error)
     }
 
+    @Test fun `a failed alarms read leaves the health settings read and its own error on the Alarms page`() {
+        val strap = FakeStrap().apply { alarmsFailure = StrapCommandException("Alarms unreadable") }
+        val vm = AlarmsViewModel(strap.controller).also { models += it }
+        val state = vm.state.value
+        assertEquals("Alarms unreadable", state.alarmsError)
+        assertNull(state.healthError)
+        assertTrue(state.health != null)
+    }
+
+    @Test fun `a failed health read leaves the alarms read and keeps the last good settings`() {
+        val strap = FakeStrap()
+        val vm = AlarmsViewModel(strap.controller).also { models += it }
+        assertTrue(vm.state.value.health != null)
+        strap.healthFailure = StrapCommandException("Settings unreadable")
+        vm.refresh()
+        val state = vm.state.value
+        assertEquals("Settings unreadable", state.healthError)
+        assertNull(state.alarmsError)
+        assertEquals(AlarmsRead.Loaded, state.read)
+        assertEquals(1, state.alarms.size)
+        assertTrue(state.health != null)
+    }
+
+    @Test fun `a failed save's reason survives the refresh that was queued meanwhile`() {
+        val strap = FakeStrap()
+        val vm = AlarmsViewModel(strap.controller).also { models += it }
+        strap.holdSave = true
+        val writing = vm.save(Alarm(0, 7, 0, 0, enabled = true), isNew = true)
+        vm.refresh()
+        strap.release(StrapCommandException("Slot taken"))
+        assertFalse(writing.getCompleted())
+        assertEquals("Slot taken", vm.state.value.error)
+        assertFalse(vm.state.value.busy)
+    }
+
     /** A strap that holds one alarm, can hold a save until [release], and counts its reads. */
     private class FakeStrap {
         var reads = 0
         var holdSave = false
         var saveFailure: Throwable? = null
+        var alarmsFailure: Throwable? = null
+        var healthFailure: Throwable? = null
         private var held: Continuation<Any?>? = null
         private val caps = AlarmCapabilities(version = 1, maxCount = 10, titles = false, smartSupported = false)
         private val flows = mutableMapOf<String, Any>()
 
-        fun release() {
-            held?.resumeWith(Result.success(Unit))
+        fun release(failure: Throwable? = null) {
+            held?.resumeWith(failure?.let { Result.failure(it) } ?: Result.success(Unit))
             held = null
             holdSave = false
         }
@@ -141,8 +179,8 @@ class AlarmsViewModelTest {
                 method.name == "hashCode" -> System.identityHashCode(proxy)
                 method.name == "equals" -> proxy === args?.firstOrNull()
                 method.name == "toString" -> "fake strap"
-                method.name == "readAlarms" -> { reads++; done(Result.success(caps to listOf(Alarm(0, 6, 0, Alarm.WEEKDAYS, enabled = true)))) }
-                method.name == "readHealthSettings" -> done(Result.success(SettingsGroup(0, 1, emptyMap())))
+                method.name == "readAlarms" -> { reads++; done(alarmsFailure?.let { Result.failure(it) } ?: Result.success(caps to listOf(Alarm(0, 6, 0, Alarm.WEEKDAYS, enabled = true)))) }
+                method.name == "readHealthSettings" -> done(healthFailure?.let { Result.failure(it) } ?: Result.success(SettingsGroup(0, 1, emptyMap())))
                 method.name == "saveAlarm" -> when {
                     saveFailure != null -> done(Result.failure(saveFailure!!))
                     holdSave -> { held = args.last() as Continuation<Any?>; COROUTINE_SUSPENDED }

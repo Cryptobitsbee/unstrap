@@ -31,7 +31,7 @@ import org.openstrap.app.ui.theme.MetricColors
 /** The scale on the Healthspan screen's bars: a habit this many years either side of the middle fills its half. */
 private const val BAR_FULL_YEARS = 1.5f
 
-/** "Updated Sunday, next in 5 days", from the Sunday the estimate was made. */
+/** "Updated Sunday, next in 5 days", from the Sunday the estimate was made; a week old or more says only that it's weekly. */
 @Composable
 @ReadOnlyComposable
 private fun updatedText(asOf: Long): String {
@@ -40,6 +40,7 @@ private fun updatedText(asOf: Long): String {
     return when (next) {
         7 -> stringResource(R.string.glow_healthspan_updated_today)
         1 -> stringResource(R.string.glow_healthspan_updated_tomorrow)
+        0 -> stringResource(R.string.glow_healthspan_updated_weekly)
         else -> pluralStringResource(R.plurals.glow_healthspan_updated_next, next, next)
     }
 }

@@ -218,10 +218,15 @@ class GdspClient(
         val parsed = WorkoutParsers.summary.parse(s.payload, ParseContext(s.headerTime))
         // The detail is asked for whether or not the summary parses, as Zepp does.
         val d = fetch(HistoryDataType.SPORT_DETAIL.code, since, zone)
-        if (parsed !is ParseResult.Success) return WorkoutFetch.Failed("summary: ${(parsed as ParseResult.Failure).reason}")
-        val summary = parsed.records.singleOrNull() ?: return WorkoutFetch.None
         // Zepp's next START: the summary's header time + 1000 ms.
         val next = s.headerTime + 1
+        // Zepp keeps the raw bytes and parses after the loop, so a summary it can't read never stops it: on to the next.
+        if (parsed !is ParseResult.Success) {
+            return WorkoutFetch.Unreadable("summary: ${(parsed as ParseResult.Failure).reason}", next)
+        }
+        if (parsed.records.isEmpty()) return WorkoutFetch.None
+        val summary = parsed.records.singleOrNull()
+            ?: return WorkoutFetch.Unreadable("summary: ${parsed.records.size} workouts in one", next)
         var retry = false
         val detail = when (d) {
             is GdspFetch.Chunk -> when (val r = WorkoutParsers.detail.parse(d.payload, ParseContext(summary.trackId))) {
@@ -250,6 +255,8 @@ class GdspClient(
 sealed interface WorkoutFetch {
     data object None : WorkoutFetch
     data class Failed(val reason: String, val fastRecharge: Boolean = false) : WorkoutFetch
+    /** A summary fetched whole that couldn't be read ([reason]); the next one is asked from [nextCursor]. */
+    data class Unreadable(val reason: String, val nextCursor: Long) : WorkoutFetch
     /** [retryDetail] is set when the detail exchange failed (worth fetching again), not when it was empty or unreadable. */
     data class Workout(val summary: WorkoutSummary, val detail: WorkoutDetail?, val nextCursor: Long, val retryDetail: Boolean = false) : WorkoutFetch
 }

@@ -92,6 +92,7 @@ internal fun DetailHost(
             ActivityDetailContext(
                 day, shown.recovery, workouts, activity, histories.daily, onOpen = push, onSwitch = {},
                 onSelectDay = dayVm::select, onEditProfile = onOpenProfile, contentPadding = padding, onBack = pop,
+                weekThrough = dayVm::weekThrough,
             ),
         )
         is Detail.Workout -> {
