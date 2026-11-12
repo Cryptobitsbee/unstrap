@@ -1,5 +1,7 @@
 package org.openstrap.app.ui.glow
 
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import org.openstrap.app.data.Weeks
 import org.openstrap.app.presentation.Units
 import org.openstrap.app.presentation.LoadBand
@@ -63,6 +65,7 @@ import org.openstrap.app.presentation.Range
 import org.openstrap.app.ui.dashboard.Score
 import org.openstrap.app.presentation.TabCopy
 import org.openstrap.app.presentation.TodayCopy
+import org.openstrap.app.ui.dashboard.WeekLater
 import org.openstrap.app.ui.dashboard.WeekStory
 import org.openstrap.app.ui.theme.AppIcons
 import org.openstrap.app.ui.theme.MetricColors
@@ -94,6 +97,8 @@ internal class ActivityDetailContext(
     val onBack: () -> Unit,
     /** The day picked, which the strip shows at once while [state] and [r] may still be the last day's. */
     val stripDate: LocalDate = state.date,
+    /** The week ending on a day as that day has it, for the week view's days after the one shown. */
+    val weekThrough: (LocalDate) -> Flow<WeekLater> = { flowOf(WeekLater()) },
 ) {
     val today: LocalDate get() = LocalDate.now()
     val isToday: Boolean get() = state.date == today
@@ -955,6 +960,18 @@ private fun ActivityRelated(current: Score, ctx: ActivityDetailContext, heartPoi
 /* ----------------------------------------------- Week ----------------------------------------------- */
 
 /**
+ * The week ending on [end] as that day has it. A past day has no active minutes or nights for the days after it, so
+ * those come from the week's last day. The night after the day shown is one of them, even on the week's last day.
+ */
+@Composable
+private fun weekLater(ctx: ActivityDetailContext, end: LocalDate): WeekLater {
+    val later by remember(end, ctx.state.date, ctx.weekThrough) {
+        if (ctx.state.date < LocalDate.now()) ctx.weekThrough(end) else flowOf(WeekLater())
+    }.collectAsStateWithLifecycle(WeekLater())
+    return later
+}
+
+/**
  * The week story, opened from Your week on Today: the card's own week (the phone's first day to its last, up to the day
  * shown), steps a day as dot bars to scrub, the week in a few numbers, a sentence comparing with the week before where
  * it's kept, and each day's line. No strip: tapping a day there would move the day shown, and with it the week.
@@ -973,12 +990,13 @@ internal fun WeekDetail(ctx: ActivityDetailContext) {
     val zone = ZoneId.systemDefault()
     fun dayOf(w: WorkoutAnalysis) = Instant.ofEpochSecond(w.workout.start).atZone(zone).toLocalDate()
     val stepsByDay = steps.orEmpty().associate { it.date to Math.round(it.value) }
+    val later = weekLater(ctx, end)
     val days = WeekStory.days(
         week, stepsByDay,
-        ctx.r?.activity?.byDay.orEmpty().mapValues { it.value.equivalent },
+        later.active + ctx.r?.activity?.byDay.orEmpty().mapValues { it.value.equivalent },
         ctx.workouts.filter { dayOf(it) in start..end && it.workout.sportType != org.openstrap.app.data.Workouts.GENERIC_ACTIVITY }
             .sortedBy { it.workout.start }.groupBy(::dayOf).mapValues { (_, v) -> v.map { it.sportName } },
-        ctx.state.nights.mapNotNull { n -> n.asleepSeconds?.let { n.date to it } }.toMap(),
+        later.asleepByMorning + ctx.state.nights.mapNotNull { n -> n.asleepSeconds?.let { n.date to it } }.toMap(),
     )
     // Steps a day leave out today while it's still going, so a morning's few steps don't pull the week down; today
     // alone still counts, rather than nothing.

@@ -268,6 +268,12 @@ data class ActivityHistory(
     }
 }
 
+/**
+ * What the week view shows of the days after the one shown: each day's active minutes, and the time asleep of each
+ * night by the morning it ended on. The day shown has neither for the days after it.
+ */
+data class WeekLater(val active: Map<LocalDate, Int> = emptyMap(), val asleepByMorning: Map<LocalDate, Long> = emptyMap())
+
 /** How long synced data must settle before the day's scores are worked out again. */
 private const val CHANGES_SETTLE_MS = 800L
 
@@ -378,6 +384,30 @@ class DayViewModel(
                 }
             }
             .onStart<RecoveryState> { emit(RecoveryState.Loading) }
+    }
+
+    /**
+     * The week ending on [end] as its last day has it, for the week view of an earlier day: active minutes are worked
+     * out for the days ending on the day asked, and nights load up to it, so the day shown has nothing for the days
+     * after it. The night after [end] belongs to the next morning, so nights are read as of that day, or today.
+     * Empty until read, and where the active minutes can't be worked out.
+     */
+    @OptIn(FlowPreview::class)
+    fun weekThrough(end: LocalDate): Flow<WeekLater> {
+        val now = Today.on(clock())
+        val morning = minOf(end.plusDays(1), now)
+        val active = combine(profile, repo.changes().debounce(CHANGES_SETTLE_MS)) { p, _ -> p }
+            .mapLatest { p ->
+                withContext(work) {
+                    catching { repo.recovery(end, p).activity?.byDay.orEmpty().mapValues { it.value.equivalent } }
+                        .onFailure { Log.w("unstrap", "the week's active minutes failed", it) }
+                        .getOrDefault(emptyMap())
+                }
+            }
+        val asleep = repo.day(morning, morning == now)
+            .map { d -> d.nights.mapNotNull { n -> n.asleepSeconds?.let { n.date to it } }.toMap() }
+        return combine(active.onStart { emit(emptyMap()) }, asleep.onStart { emit(emptyMap()) }, ::WeekLater)
+            .distinctUntilChanged().flowOn(work)
     }
 
     /**
