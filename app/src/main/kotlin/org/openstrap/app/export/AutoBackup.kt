@@ -122,14 +122,16 @@ class AutoBackup(
         try {
             (resolver.openOutputStream(temp.uri, "w") ?: throw Failed(BackupFailure.CantWrite)).use { backups.writeZip(it) }
             // A second run on the same day replaces the first, but only once the new one is in place: the old one is
-            // moved aside, and put back if the new one can't be written.
-            val previous = dir.findFile(name)
+            // moved aside, and put back if the new one can't be written. A provider that can't rename deletes it first,
+            // as before: the new one is complete by then.
             val aside = BackupFiles.asideName(today)
-            if (previous != null && !previous.renameTo(aside)) throw Failed(BackupFailure.CantWrite)
+            val previous = dir.findFile(name)
+            val movedAside = previous != null && previous.renameTo(aside)
+            if (previous != null && !movedAside && !previous.delete()) throw Failed(BackupFailure.CantWrite)
             try {
                 if (!temp.renameTo(name)) copyAs(dir, temp, name)
             } catch (e: Throwable) {
-                if (previous != null) runCatching { dir.findFile(aside)?.renameTo(name) }
+                if (movedAside) runCatching { dir.findFile(aside)?.renameTo(name) }
                 throw e
             }
             dir.findFile(aside)?.let(::deleteQuietly)
