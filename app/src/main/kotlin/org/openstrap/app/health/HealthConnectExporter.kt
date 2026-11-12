@@ -680,7 +680,9 @@ internal suspend fun RecordStore.dropStaleStrapWorkouts(from: Long, to: Long, wr
 internal suspend fun RecordStore.dropPhoneWorkout(start: Long, from: Long, to: Long) {
     // A day wider each side: the ids pick the records, so the range only has to hold them, however the filter treats
     // a session's ends.
-    val range = TimeRangeFilter.between(Instant.ofEpochSecond(from).minus(Duration.ofDays(1)), Instant.ofEpochSecond(to).plus(Duration.ofDays(1)))
+    val range = TimeRangeFilter.between(
+        Instant.ofEpochSecond(from).minus(Duration.ofDays(1)), Instant.ofEpochSecond(to).plus(Duration.ofDays(1)),
+    )
     for ((type, id) in listOf(
         androidx.health.connect.client.records.ExerciseSessionRecord::class to "openstrap:workout:$start",
         androidx.health.connect.client.records.DistanceRecord::class to "openstrap:distance:$start",

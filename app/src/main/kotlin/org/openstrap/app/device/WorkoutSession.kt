@@ -137,7 +137,7 @@ class WorkoutSession(
     /** A finished workout was saved or changed, by its start: auto sync writes it to Health Connect. Returns at once. */
     private val onSaved: (start: Long) -> Unit = {},
     /** A saved workout was deleted, by its start and the range it was recorded over: auto sync takes it out of Health Connect. */
-    private val onRemoved: (start: Long, from: Long, to: Long) -> Unit = { _, _, _ -> },
+    onRemoved: (start: Long, from: Long, to: Long) -> Unit = { _, _, _ -> },
     /** Epoch seconds now. Tests pass a clock they move by hand. */
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
     /** Where the workout's long-lived work runs: the app's scope, `AppContainer.appScope`. */
@@ -669,8 +669,9 @@ class WorkoutSession(
         w: AppWorkout, stored: List<AppWorkoutHeartRate>, route: List<Route.Point>,
         sets: List<org.openstrap.app.data.db.AppWorkoutSet>, rounds: List<org.openstrap.app.data.db.AppWorkoutRound>,
     ): Long = (
-        stored.map { it.timestamp } + route.map { it.t } + w.lapMarks + w.pauseRanges.map { it.last } + listOfNotNull(w.pausedAt) +
-            sets.flatMap { listOfNotNull(it.start, it.end, it.restEnd) } + rounds.flatMap { listOfNotNull(it.workStart, it.workEnd, it.restEnd) }
+        stored.map { it.timestamp } + route.map { it.t } + w.lapMarks + w.pauseRanges.map { it.last } +
+            listOfNotNull(w.pausedAt) + sets.flatMap { listOfNotNull(it.start, it.end, it.restEnd) } +
+            rounds.flatMap { listOfNotNull(it.workStart, it.workEnd, it.restEnd) }
         ).fold(w.start, ::maxOf)
 
     /** Whether [w] ended at [end] would be kept: [MIN_SAVED_S] active, or it is deleted as a mis-tap. */
@@ -918,10 +919,12 @@ class WorkoutSession(
 
     /** [r] with its rest ended now, when a finished set's rest is under way, not paused, and over; else null. */
     private fun restEnded(r: WorkoutState.Recording): WorkoutState.Recording? {
-        if (r.paused) return null
-        val until = r.restUntil ?: return null
-        val last = r.sets.lastOrNull()?.takeIf { it.end != null && it.restEnd == null } ?: return null
-        if (!org.openstrap.app.data.Strength.restOver(restRule(r.workout), last.end!!, until, window, now())) return null
+        val until = r.restUntil.takeIf { !r.paused }
+        val last = r.sets.lastOrNull()?.takeIf { it.restEnd == null }
+        val setEnd = last?.end
+        val over = until != null && setEnd != null &&
+            org.openstrap.app.data.Strength.restOver(restRule(r.workout), setEnd, until, window, now())
+        if (!over || last == null) return null
         return r.copy(sets = r.sets.dropLast(1) + last.copy(restEnd = now()), restUntil = null)
     }
 

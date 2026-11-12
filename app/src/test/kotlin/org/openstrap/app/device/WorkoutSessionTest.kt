@@ -886,7 +886,9 @@ class WorkoutSessionTest {
     @Test
     fun aRestDoesNotEndWhilePausedAndEndsOnceResumed() {
         val s = session()
-        s.start(sportType = 1)
+        // Strength: only its rest is checked each second.
+        s.start(sportType = SportTypes.STRENGTH_TRAINING)
+        s.recording()
         s.startSet()
         s.recording { it.inSet }
         clock.advance(Duration.ofSeconds(40))

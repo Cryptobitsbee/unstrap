@@ -221,9 +221,12 @@ class GdspClient(
         // Zepp's next START: the summary's header time + 1000 ms.
         val next = s.headerTime + 1
         // Zepp keeps the raw bytes and parses after the loop, so a summary it can't read never stops it: on to the next.
-        if (parsed !is ParseResult.Success) return WorkoutFetch.Unreadable("summary: ${(parsed as ParseResult.Failure).reason}", next)
+        if (parsed !is ParseResult.Success) {
+            return WorkoutFetch.Unreadable("summary: ${(parsed as ParseResult.Failure).reason}", next)
+        }
         if (parsed.records.isEmpty()) return WorkoutFetch.None
-        val summary = parsed.records.singleOrNull() ?: return WorkoutFetch.Unreadable("summary: ${parsed.records.size} workouts in one", next)
+        val summary = parsed.records.singleOrNull()
+            ?: return WorkoutFetch.Unreadable("summary: ${parsed.records.size} workouts in one", next)
         var retry = false
         val detail = when (d) {
             is GdspFetch.Chunk -> when (val r = WorkoutParsers.detail.parse(d.payload, ParseContext(summary.trackId))) {

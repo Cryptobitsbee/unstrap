@@ -128,11 +128,12 @@ class AutoBackup(
             val previous = dir.findFile(name)
             val movedAside = previous != null && previous.renameTo(aside)
             if (previous != null && !movedAside && !previous.delete()) throw Failed(BackupFailure.CantWrite)
+            var installed = false
             try {
                 if (!temp.renameTo(name)) copyAs(dir, temp, name)
-            } catch (e: Throwable) {
-                if (movedAside) runCatching { dir.findFile(aside)?.renameTo(name) }
-                throw e
+                installed = true
+            } finally {
+                if (!installed && movedAside) runCatching { dir.findFile(aside)?.renameTo(name) }
             }
             dir.findFile(aside)?.let(::deleteQuietly)
             written = true

@@ -186,6 +186,8 @@ class AppRootViewModel(
      * The rewards page for [i], tried [VIEW_TRIES] times [VIEW_RETRY_MS] apart, as a read can hit a locked database.
      * Null while the list is still loading (empty with workouts stored), or when every try failed.
      */
+    // Each return is a way it ends: still loading, worked out, or every try failed.
+    @Suppress("ReturnCount")
     private suspend fun viewOf(i: RewardsInputs, dao: HealthDao): RewardsView? {
         repeat(VIEW_TRIES) { n ->
             if (n > 0) delay(VIEW_RETRY_MS)

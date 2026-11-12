@@ -134,9 +134,11 @@ internal class SavedWorkoutEditor(
      * stretch that started outside it, and an undo needs ones never worked out. Left as they are without the whole route.
      */
     private fun withStretches(w: AppWorkout, track: WorkoutDistance.Track?): AppWorkout {
-        val end = w.end ?: return w
-        if (track == null || track.routeSince > w.start || track.route.isEmpty()) return w
-        val stretches = org.openstrap.app.data.Rewards.stretches(track.route.filter { it.t in w.from..end }, w.pauseRanges)
+        val end = w.end
+        // Only a route from the start: one picked up after a restart would lose the stretches before it.
+        val whole = track?.takeIf { it.routeSince <= w.start && it.route.isNotEmpty() }
+        if (end == null || whole == null) return w
+        val stretches = org.openstrap.app.data.Rewards.stretches(whole.route.filter { it.t in w.from..end }, w.pauseRanges)
             .let(org.openstrap.app.data.Rewards.Stretch::format)
         return w.copy(stretches = stretches)
     }
