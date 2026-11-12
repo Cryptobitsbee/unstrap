@@ -54,6 +54,44 @@ class WorkoutDistanceTest {
     }
 
     @Test
+    fun stepsBeforeTheFirstFixAreKeptWhenGpsTakesOver() {
+        // 3 minutes of steps, then a fix every 10 s for 10 minutes: the route adds to them, it doesn't replace them.
+        val fix = t0 + 180
+        val route = line(600).map { it.copy(t = it.t + 180) }
+        val w = AppWorkout(t0, t0 + 780, SportTypes.WALK)
+        val gps = WorkoutDistance.shown(w, t0 + 780, track(route))!!
+        val both = WorkoutDistance.shown(w, t0 + 780, track(route, totals(t0, 13)))!!
+        val before = 300 * Activity.stepLength(100, 175)
+        assertEquals(gps.first + before, both.first, 0.01f)
+        // The route is nearly all of it, so it is still a GPS run.
+        assertEquals(false, both.second)
+        // Before the first fix settles the figure is the steps, and it doesn't drop when the fix arrives.
+        val early = WorkoutDistance.shown(w.copy(end = null), fix - 10, track(steps = totals(t0, 13)))!!
+        assertTrue(early.second)
+        assertTrue(both.first >= early.first)
+    }
+
+    @Test
+    fun withMostlyStepsBeforeTheFirstFixItStaysFromSteps() {
+        val route = line(60).map { it.copy(t = it.t + 540) }
+        val w = AppWorkout(t0, t0 + 600, SportTypes.WALK)
+        val m = WorkoutDistance.shown(w, t0 + 600, track(route, totals(t0, 10)))!!
+        assertTrue(m.second)
+        assertTrue(m.first > 500 * Activity.stepLength(100, 175) * 0.8f)
+    }
+
+    @Test
+    fun aTrimmedStartAfterTheFirstFixCountsNoStepsAndABikeNeverDoes() {
+        val route = line(600).map { it.copy(t = it.t + 180) }
+        val trimmed = AppWorkout(t0, t0 + 780, SportTypes.WALK, shownStart = t0 + 300)
+        val gps = WorkoutDistance.shown(trimmed, t0 + 780, track(route))!!
+        assertEquals(gps, WorkoutDistance.shown(trimmed, t0 + 780, track(route, totals(t0, 13))))
+        // A bike has no steps to add.
+        val bike = AppWorkout(t0, t0 + 780, SportTypes.OUTDOOR_CYCLING)
+        assertEquals(WorkoutDistance.shown(bike, t0 + 780, track(route))!!, WorkoutDistance.shown(bike, t0 + 780, track(route, totals(t0, 13)))!!)
+    }
+
+    @Test
     fun theTotalGoingBackToZeroAtMidnightCostsOnlyTheStepsBeforeIt() {
         assertEquals(200, WorkoutDistance.taken(listOf(0L to 9_000, 60L to 9_100, 120L to 50, 180L to 150), 0, 180))
         assertEquals(0, WorkoutDistance.taken(emptyList(), 0, 180))
