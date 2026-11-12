@@ -53,7 +53,8 @@ class AlarmsViewModelTest {
         val vm = AlarmsViewModel(failingStrap(failure)).also { models += it }
         val state = vm.state.value
         assertFalse(state.loading)
-        return state.error
+        // A failed read is the Alarms page's own error, apart from a failed write's.
+        return state.alarmsError
     }
 
     /** A strap whose alarm read fails with [failure]. Everything else answers empty. */

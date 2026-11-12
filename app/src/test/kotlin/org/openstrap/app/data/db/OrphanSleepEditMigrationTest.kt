@@ -34,15 +34,21 @@ class OrphanSleepEditMigrationTest {
             for (i in 0 until setup.length()) db.execSQL(setup.getString(i))
             val old = System.currentTimeMillis() / 1000 - 8 * 86_400L
             val now = System.currentTimeMillis() / 1000
-            db.execSQL("INSERT INTO sleep_session (start, `end`, day, nap, source) VALUES (100000, 130000, 86400, 0, 0)")
-            // Exact and resent 10 minutes off stay; a nap edit near a main sleep has no nap near and goes.
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (100000, 0, 99000, 131000, 0, $now)")
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (99400, 0, NULL, NULL, 1, $now)")
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (100500, 1, 100000, 103000, 0, $now)")
-            // Left by a minute night: a move and a delete with no session near, and an old delete marker that stays.
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (500000, 0, 499000, 530000, 0, $now)")
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (600000, 0, NULL, NULL, 1, $now)")
-            db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES (700000, 0, NULL, NULL, 1, $old)")
+            // 21 October 2026 22:00 UTC, inside the weeks minute nights were made for.
+            val night = 1_792_620_000L
+            fun edit(strapStart: Long, nap: Int, start: Long?, end: Long?, deleted: Int, at: Long) =
+                db.execSQL("INSERT INTO sleep_edit (strapStart, nap, start, `end`, deleted, editedAt) VALUES ($strapStart, $nap, $start, $end, $deleted, $at)")
+            db.execSQL("INSERT INTO sleep_session (start, `end`, day, nap, source) VALUES ($night, ${night + 30_000}, 86400, 0, 0)")
+            // A strap night's edits stay: exact, and resent 10 minutes off. A nap edit is never touched.
+            edit(night, 0, night - 1000, night + 31_000, 0, now)
+            edit(night - 600, 0, null, null, 1, now)
+            edit(night + 500, 1, night, night + 3000, 0, now)
+            // Left by minute nights: a move and a delete with no night near go; an expired delete marker stays.
+            edit(night + 400_000, 0, night + 399_000, night + 430_000, 0, now)
+            edit(night + 500_000, 0, null, null, 1, now)
+            edit(night + 600_000, 0, null, null, 1, old)
+            // Outside those weeks nothing is touched, with a night near or not.
+            edit(100_000, 0, 99_000, 130_000, 0, now)
             db.version = 31
         }
 
@@ -51,7 +57,7 @@ class OrphanSleepEditMigrationTest {
         try {
             val db = room.openHelper.readableDatabase
             assertEquals(
-                listOf(99400L, 100000L, 700000L),
+                listOf(100_000L, 1_792_620_000L - 600, 1_792_620_000L, 1_792_620_000L + 500, 1_792_620_000L + 600_000),
                 db.query("SELECT strapStart FROM sleep_edit ORDER BY strapStart").use { c -> List(c.count) { c.moveToNext(); c.getLong(0) } },
             )
         } finally {
