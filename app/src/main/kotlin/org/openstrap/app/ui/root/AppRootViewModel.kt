@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,13 +15,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -175,10 +176,26 @@ class AppRootViewModel(
     val rewardsView: StateFlow<RewardsView?> =
         combine(workouts, goals.map { it.workoutsPerWeek }, dao.personalBests(), dao.badges()) { list, goal, bests, earned ->
             RewardsInputs(list, goal, bests, earned)
-        }.filter { it.workouts.isNotEmpty() || !dao.anyWorkoutOnce() }
-            .mapLatest { i -> catching { rewards.view(i.workouts, i.goal, i.bests, i.earned) }.getOrNull() }
+        }.mapLatest { i -> viewOf(i, dao) }
+            // Null is the list still loading, or a view that couldn't be worked out: what showed before stays.
+            .filterNotNull()
             .flowOn(work)
             .state(null)
+
+    /**
+     * The rewards page for [i], tried [VIEW_TRIES] times [VIEW_RETRY_MS] apart, as a read can hit a locked database.
+     * Null while the list is still loading (empty with workouts stored), or when every try failed.
+     */
+    private suspend fun viewOf(i: RewardsInputs, dao: HealthDao): RewardsView? {
+        repeat(VIEW_TRIES) { n ->
+            if (n > 0) delay(VIEW_RETRY_MS)
+            catching {
+                if (i.workouts.isEmpty() && dao.anyWorkoutOnce()) return null
+                return rewards.view(i.workouts, i.goal, i.bests, i.earned)
+            }.onFailure { Log.w(TAG, "rewards page not worked out", it) }
+        }
+        return null
+    }
 
     private class RewardsInputs(
         val workouts: List<WorkoutAnalysis>,
@@ -199,11 +216,12 @@ class AppRootViewModel(
         // (workouts spec 4), and on a new goal. The one recording isn't in it until it ends. Started at once, as the
         // weekly recap notification reads what's stored.
         val recording = workout.state.map { (it as? WorkoutState.Recording)?.workout?.start }.distinctUntilChanged()
+        // Each sync too: the step badges and the most steps follow the days' steps, which only a sync writes.
         viewModelScope.launch(work) {
-            combine(workouts, recording, settings.goals) { list, start, g ->
+            val inputs = combine(workouts, recording, settings.goals) { list, start, g ->
                 list.filter { it.workout.start != start } to g.workoutsPerWeek
-            }
-                .distinctUntilChangedBy { (list, goal) -> list.map { Triple(it.workout.start, it.shownStart, it.end) } to goal }
+            }.distinctUntilChangedBy { (list, goal) -> list.map { Triple(it.workout.start, it.shownStart, it.end) } to goal }
+            combine(inputs, strap.syncEnded.onSubscription { emit(Unit) }) { i, _ -> i }
                 .collectLatest { (list, goal) -> catching { rewards.refresh(list, goal) }.onFailure { Log.w(TAG, "rewards failed", it) } }
         }
     }
@@ -289,5 +307,7 @@ class AppRootViewModel(
     private companion object {
         const val TAG = "unstrap"
         const val STOP_MS = 5_000L
+        const val VIEW_TRIES = 3
+        const val VIEW_RETRY_MS = 2_000L
     }
 }

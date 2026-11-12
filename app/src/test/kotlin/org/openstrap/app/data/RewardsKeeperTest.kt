@@ -115,6 +115,34 @@ class RewardsKeeperTest {
         assertTrue(settings.rewardsStarted.first())
     }
 
+    @Test fun `steps earn their badge and best with no workout at all`() = runBlocking {
+        val dao = db.healthDao()
+        // 10,000 steps in one day: 100 minutes of 100, from 10:00 local so they never cross midnight.
+        val morning = java.time.LocalDate.of(2026, 10, 15).atTime(10, 0).atZone(java.time.ZoneId.systemDefault()).toEpochSecond()
+        dao.insertActivity((0 until 100).map { ActivityMinute(morning + it * 60L, 100, 0, 0, null) })
+        RewardsKeeper(dao, settings).refresh(emptyList(), 3)
+        assertTrue(dao.badgesOnce().any { it.id == "first_10k_steps" })
+        assertTrue(dao.personalBestsOnce().any { it.kind == Rewards.Kind.MOST_STEPS })
+        // Earned before the rewards started, so it waits with the history badges.
+        assertTrue(settings.historyBadgesWaiting.first())
+    }
+
+    @Test fun `deleting the last workout takes its bests and its week, and the badges stay`() = runBlocking {
+        val dao = db.healthDao()
+        val keeper = RewardsKeeper(dao, settings)
+        val w = workout(0)
+        dao.insertAppWorkouts(listOf(w))
+        keeper.refresh(listOf(WorkoutRecorder.analyse(w, emptyList(), 190, HeartZones.STANDARD)), 3)
+        assertTrue(dao.personalBestsOnce().isNotEmpty())
+        assertEquals(1, dao.weekResultsOnce().sumOf { it.count })
+        val badges = dao.badgesOnce()
+        dao.deleteAppWorkout(w.start)
+        keeper.refresh(emptyList(), 3)
+        assertTrue(dao.personalBestsOnce().isEmpty())
+        assertEquals(0, dao.weekResultsOnce().sumOf { it.count })
+        assertEquals(badges, dao.badgesOnce())
+    }
+
     @Test fun `a strap workout is history, so the empty list waits for it`() = runBlocking {
         val dao = db.healthDao()
         dao.insertWorkouts(listOf(org.openstrap.app.testing.workout(start)))
