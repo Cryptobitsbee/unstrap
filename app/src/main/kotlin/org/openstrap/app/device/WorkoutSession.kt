@@ -136,6 +136,8 @@ class WorkoutSession(
     private val callRinging: () -> Boolean = { false },
     /** A finished workout was saved or changed, by its start: auto sync writes it to Health Connect. Returns at once. */
     private val onSaved: (start: Long) -> Unit = {},
+    /** A saved workout was deleted, by its start and the range it was recorded over: auto sync takes it out of Health Connect. */
+    onRemoved: (start: Long, from: Long, to: Long) -> Unit = { _, _, _ -> },
     /** Epoch seconds now. Tests pass a clock they move by hand. */
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
     /** Where the workout's long-lived work runs: the app's scope, `AppContainer.appScope`. */
@@ -150,7 +152,7 @@ class WorkoutSession(
     /** Discard, trim and save from history: changes to workouts already saved, under the same [lock]. */
     private val editor = SavedWorkoutEditor(
         dao, settings, lock, onSaved, onDiscarded = ::closeDiscarded, log = { log(it) }, clock = clock, scope = scope,
-        track = { start -> if (start == trackStart) track() else null },
+        track = { start -> if (start == trackStart) track() else null }, onRemoved = onRemoved,
     )
 
     /**
@@ -266,15 +268,21 @@ class WorkoutSession(
             val w = dao.activeAppWorkout() ?: return@withLock null
             val now = now()
             val stored = dao.appWorkoutHeartRateOnce(w.start)
-            val last = maxOf(w.start, stored.maxOfOrNull { it.timestamp } ?: w.start)
+            // A kept route comes back. One that wasn't kept was only ever in memory, and so were the step totals.
+            val restored = if (w.keepRoute) dao.routeOnce(w.start).map { it.point } else emptyList()
+            val sets = dao.setsOnce(w.start)
+            val rounds = if (w.structure != null) dao.roundsOnce(w.start) else emptyList()
+            val last = lastKnown(w, stored, restored, sets, rounds)
             val waits = now - last > LEFT_RECORDING_S
-            // Paused, nothing the strap measured since is part of it.
-            if (waits && w.pausedAt != null) {
+            // Paused, nothing the strap measured since is part of it. Ending it then would leave under a minute only
+            // when nothing of it was stored: it comes back paused instead, for the wearer to end or delete.
+            if (waits && w.pausedAt != null && keptEndingAt(w, last)) {
                 endLeftRecording(w, last)
                 return@withLock null
             }
-            // Set before it shows as recording, so an End tapped at once already waits for the strap.
-            left = if (waits) LeftRecording.Left(w.start, last, now) else null
+            // Set before it shows as recording, so an End tapped at once already waits for the strap. One left paused
+            // only gets here when ending it would delete it: it doesn't wait.
+            left = if (waits && w.pausedAt == null) LeftRecording.Left(w.start, last, now) else null
             _recent.value = stored.filter { !it.fromHistory && it.timestamp >= now - RECENT_S }.map { it.timestamp to it.bpm }
             sum = stored.sumOf { it.bpm.toLong() }
             count = stored.size.toLong()
@@ -295,20 +303,16 @@ class WorkoutSession(
             synchronized(allReadings) { allReadings.clear(); allReadings.addAll(live) }
             _history.value = live
             window = live.filter { it.first >= now - STOP_WINDOW_S }
-            // A kept route comes back. One that wasn't kept was only ever in memory, and so were the step
-            // totals. What was stored then stands for the time before now, and the distance adds to it.
-            val restored = if (w.keepRoute) dao.routeOnce(w.start).map { it.point } else emptyList()
+            // What was stored stands for the time before now, and the distance adds to it.
             _route.update { restored }
             savedPoints = _route.value.size
             trackFrom(w, routeSince = if (w.keepRoute) w.start else now, stepsSince = now, before = w)
             // A restart mustn't ask at once about a stop it can't see the start of.
             askSince = now
-            val sets = dao.setsOnce(w.start)
             val restUntil = sets.lastOrNull()?.takeIf { it.end != null && it.restEnd == null }?.let { it.end!! + restRule(w).seconds }
             // Logging is the sport's setting at its start, which Ready saved then.
             val log = catching { settings.sportSettings.first()[org.openstrap.app.data.Workouts.tileType(w.sportType)]?.log }
                 .onFailure { log("workout: sport settings not read: $it") }.getOrNull() == true
-            val rounds = if (w.structure != null) dao.roundsOnce(w.start) else emptyList()
             begin(w, maxHr) {
                 it.copy(
                     sets = sets, restUntil = restUntil, exercise = sets.lastOrNull()?.exercise, logSets = log, rounds = rounds,
@@ -540,7 +544,7 @@ class WorkoutSession(
         val l = left ?: return finish(null, AppWorkout.END_USER, toStrap)
         scope.launch {
             val v = judge(l, final = true)
-            if (v is LeftRecording.Verdict.End) finish(v.at, AppWorkout.END_AUTO, toStrap, startOf = l.start)
+            if (v is LeftRecording.Verdict.End) finish(v.at, AppWorkout.END_AUTO, toStrap, startOf = l.start, ifShort = IfShort.EndAsRecorded)
             else finish(null, AppWorkout.END_USER, toStrap)
         }
     }
@@ -557,8 +561,21 @@ class WorkoutSession(
         _state.update { s -> (s as? WorkoutState.Recording)?.takeIf { it.endPrompt != null }?.copy(endPrompt = null, inCar = false) ?: s }
     }
 
-    /** [toStrap] false when the strap ended its session itself. [startOf]: only if it is still that workout recording. */
-    private fun finish(at: Long?, reason: Int, toStrap: Boolean = true, startOf: Long? = null) {
+    /** What an end the app worked out ([LeftRecording]) does when it would leave under a minute, which deletes it. */
+    private enum class IfShort {
+        /** Deleted, as any workout under a minute. */
+        Delete,
+        /** Not ended: it records on for the wearer to end or delete (an end nobody chose). */
+        RecordOn,
+        /** Ended where it was recorded to (End was tapped, so it ends, but not by deleting it). */
+        EndAsRecorded,
+    }
+
+    /**
+     * [toStrap] false when the strap ended its session itself. [startOf]: only if it is still that workout recording.
+     * [ifShort]: what an end at [at] that would leave under a minute does instead.
+     */
+    private fun finish(at: Long?, reason: Int, toStrap: Boolean = true, startOf: Long? = null, ifShort: IfShort = IfShort.Delete) {
         scope.launch {
             lock.withLock {
                 val r = _state.value as? WorkoutState.Recording ?: return@withLock
@@ -571,10 +588,20 @@ class WorkoutSession(
                 saveDistance()
                 val w = r.workout
                 val recorded = w.pausedAt ?: now()
-                val end = at?.coerceIn(w.start, recorded) ?: recorded
+                // Nothing said how long a workout left recording ran: deleting it would lose one the wearer started.
+                val asked = at?.coerceIn(w.start, recorded) ?: recorded
+                val short = !keptEndingAt(w, asked)
+                if (short && ifShort == IfShort.RecordOn) {
+                    log("workout left recording: ending at ${java.time.Instant.ofEpochSecond(asked)} would delete it, it records on")
+                    ending = false
+                    left = null
+                    return@withLock
+                }
+                val end = if (short && ifShort == IfShort.EndAsRecorded) recorded else asked
+                val endReason = if (end == asked) reason else AppWorkout.END_USER
                 // Its distance written here, over the range it shows: an update() queued behind this lock would find
                 // the workout already ended, and an early End leaves out what came after.
-                val ended = w.copy(end = end, pausedAt = null, endReason = reason, recordedEnd = recorded.takeIf { it > end })
+                val ended = w.copy(end = end, pausedAt = null, endReason = endReason, recordedEnd = recorded.takeIf { it > end })
                     .let { WorkoutDistance.withShown(it, recorded, track()) }
                 val kept = WorkoutRecorder.activeSeconds(ended, end) >= MIN_SAVED_S
                 closeLast(r.sets, r.rounds, end)
@@ -634,6 +661,24 @@ class WorkoutSession(
     }
 
     /**
+     * The last moment anything stored says [w] went on: its heart rate [stored], its kept [route], its [sets] and
+     * [rounds], its laps and pauses. Never before its start. Without the strap's heart rate a GPS run still has its
+     * route, so it isn't taken as ended at its start.
+     */
+    private fun lastKnown(
+        w: AppWorkout, stored: List<AppWorkoutHeartRate>, route: List<Route.Point>,
+        sets: List<org.openstrap.app.data.db.AppWorkoutSet>, rounds: List<org.openstrap.app.data.db.AppWorkoutRound>,
+    ): Long = (
+        stored.map { it.timestamp } + route.map { it.t } + w.lapMarks + w.pauseRanges.map { it.last } +
+            listOfNotNull(w.pausedAt) + sets.flatMap { listOfNotNull(it.start, it.end, it.restEnd) } +
+            rounds.flatMap { listOfNotNull(it.workStart, it.workEnd, it.restEnd) }
+        ).fold(w.start, ::maxOf)
+
+    /** Whether [w] ended at [end] would be kept: [MIN_SAVED_S] active, or it is deleted as a mis-tap. */
+    private fun keptEndingAt(w: AppWorkout, end: Long): Boolean =
+        WorkoutRecorder.activeSeconds(w.copy(end = end, pausedAt = null), end) >= MIN_SAVED_S
+
+    /**
      * A workout the app was killed during while paused, with no reading for [LEFT_RECORDING_S]: ended at its [last]
      * reading, as End then would have, and its summary shows. Nothing after [last] is part of it, so a gap fill has
      * nothing after it to fill. Under [lock].
@@ -682,7 +727,7 @@ class WorkoutSession(
         when (v) {
             is LeftRecording.Verdict.End -> {
                 log("workout left recording: ${v.why}, ended at ${java.time.Instant.ofEpochSecond(v.at)}")
-                finish(v.at, AppWorkout.END_AUTO, startOf = l.start)
+                finish(v.at, AppWorkout.END_AUTO, startOf = l.start, ifShort = IfShort.RecordOn)
             }
             LeftRecording.Verdict.CarryOn -> {
                 log("workout left recording: still under way, it records on")
@@ -840,7 +885,8 @@ class WorkoutSession(
     /** "+30 s". */
     fun extendRest() = editSets { r -> r.restUntil?.let { r.copy(restUntil = it + org.openstrap.app.data.Strength.EXTEND_S) } ?: r }
 
-    private fun editSets(change: (WorkoutState.Recording) -> WorkoutState.Recording) {
+    /** [change] to the sets under the lock, saved; [then] runs once it is applied, not when it changed nothing. */
+    private fun editSets(then: (() -> Unit)? = null, change: (WorkoutState.Recording) -> WorkoutState.Recording) {
         scope.launch {
             lock.withLock {
                 val r = _state.value as? WorkoutState.Recording ?: return@withLock
@@ -855,18 +901,31 @@ class WorkoutSession(
                         ?.copy(sets = changed.sets, restUntil = changed.restUntil, exercise = changed.exercise)
                         ?.withSave(SavePart.Sets, failed) ?: it
                 }
+                then?.invoke()
             }
         }
     }
 
-    /** Once a second while resting: rest is over at its time, or once heart rate holds below the chosen level. */
+    /**
+     * Once a second while resting: rest is over at its time, or once heart rate holds below the chosen level. Never
+     * while paused. Decided again under the lock, so a set started or +10 s tapped meanwhile wins, and the cue only
+     * plays for a rest it really ended.
+     */
     private fun checkRest() {
         val r = _state.value as? WorkoutState.Recording ?: return
-        val until = r.restUntil ?: return
-        val last = r.sets.lastOrNull()?.end ?: return
-        if (!org.openstrap.app.data.Strength.restOver(restRule(r.workout), last, until, window, now())) return
-        editSets { it.copy(sets = it.sets.dropLast(1) + it.sets.last().copy(restEnd = now()), restUntil = null) }
-        cue(org.openstrap.app.data.Cue.RestOver)
+        if (restEnded(r) == null) return
+        editSets(then = { cue(org.openstrap.app.data.Cue.RestOver) }) { restEnded(it) ?: it }
+    }
+
+    /** [r] with its rest ended now, when a finished set's rest is under way, not paused, and over; else null. */
+    private fun restEnded(r: WorkoutState.Recording): WorkoutState.Recording? {
+        val until = r.restUntil.takeIf { !r.paused }
+        val last = r.sets.lastOrNull()?.takeIf { it.restEnd == null }
+        val setEnd = last?.end
+        val over = until != null && setEnd != null &&
+            org.openstrap.app.data.Strength.restOver(restRule(r.workout), setEnd, until, window, now())
+        if (!over || last == null) return null
+        return r.copy(sets = r.sets.dropLast(1) + last.copy(restEnd = now()), restUntil = null)
     }
 
     /* ------------------------------------------- Rounds -------------------------------------------- */

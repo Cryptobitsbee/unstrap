@@ -50,6 +50,7 @@ class AppContainer(val app: Application) {
     val autoHealthConnect = org.openstrap.app.health.HealthConnectAutoSync(app, settings, healthConnect, strap, scope = appScope)
     val workout = org.openstrap.app.device.WorkoutSession(
         app, database.healthDao(), settings, strap, maxHeartRates, callRinging = { phoneAlerts.callRinging }, onSaved = autoHealthConnect::workoutSaved,
+        onRemoved = autoHealthConnect::workoutDiscarded,
         scope = appScope,
     )
     /** Saved and the Keep recording notice, from the session's state, on the app scope (audit S10). */

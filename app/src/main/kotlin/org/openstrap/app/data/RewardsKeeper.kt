@@ -85,11 +85,10 @@ class RewardsKeeper(
 
     /** Works everything out again from [workouts] against [goal] and stores it. */
     suspend fun refresh(workouts: List<WorkoutAnalysis>, goal: Int) = refreshLock.withLock {
-        // The list starts empty before it loads: only a database with no workouts at all starts the rewards empty.
-        if (workouts.isEmpty()) {
-            if (!settings.rewardsStarted.first() && !dao.anyWorkoutOnce()) settings.startRewards(historyBadges = false)
-            return@withLock
-        }
+        // The list starts empty before it loads, so an empty list waits while workouts are stored. With none stored it
+        // is worked out all the same: the step badges and bests need no workout, and deleting the last workout takes
+        // its bests and its week with it.
+        if (workouts.isEmpty() && dao.anyWorkoutOnce()) return@withLock
         val f = facts(workouts)
         withContext(Dispatchers.Default) {
             val today = LocalDate.now(f.zone)

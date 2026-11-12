@@ -21,6 +21,12 @@ class BackupFilesTest {
         assertFalse(BackupFiles.isTemp(BackupFiles.name(day)))
     }
 
+    @Test fun `the name an old backup waits under is a temp, never a backup`() {
+        assertTrue(BackupFiles.isTemp(BackupFiles.asideName(day)))
+        assertNull(BackupFiles.dateOf(BackupFiles.asideName(day)))
+        assertTrue(BackupFiles.toDelete(listOf(BackupFiles.asideName(day))).isEmpty())
+    }
+
     @Test fun `only our own names count as backups`() {
         for (name in listOf(
             "unstrap-backup-2026-10-29 (1).zip", "Unstrap-backup-2026-10-29.zip", "unstrap-backup-2026-10-29.zip.bak",

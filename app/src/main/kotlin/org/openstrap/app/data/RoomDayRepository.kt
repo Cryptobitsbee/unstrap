@@ -52,10 +52,12 @@ class RoomDayRepository(
         val span = DayWindow(
             SleepHistory.endingOn(date.minusDays(SleepHistory.NIGHTS - 1L), zone).from, SleepHistory.endingOn(date, zone).to,
         )
+        // The oldest night began the evening before its day, so its readings start there, not at that midnight.
+        val readings = DayWindow(SleepHistory.readingsOf(date.minusDays(SleepHistory.NIGHTS - 1L), zone).from, span.to)
         val extras = combine(health.skinTemperature(day), health.breathRate(night), health.latestPai(day.to)) { skin, breath, pai ->
             Triple(skin, breath, pai?.takeIf { it.timestamp >= day.from })
         }
-        val sleepAndExtras = combine(nights(date, night, span, zone), extras, baselines(date)) { s, e, b -> Triple(s, e, b) }
+        val sleepAndExtras = combine(nights(date, night, span, readings, zone), extras, baselines(date)) { s, e, b -> Triple(s, e, b) }
 
         // The strap's own running total covers steps whose minute records were already taken by another app.
         val todayLive = if (isToday) strapSteps else flowOf(null)
@@ -117,13 +119,13 @@ class RoomDayRepository(
     }
 
     /**
-     * The day's sleep ([sleep]), the [SleepHistory.NIGHTS] nights over [span] with the vitals averaged over each, and
-     * the night's own readings for the charts of the night-scoped details.
+     * The day's sleep ([sleep]), the [SleepHistory.NIGHTS] nights over [span] with the vitals averaged over each (read over
+     * [readings], from the oldest night's evening), and the night's own readings for the charts of the night-scoped details.
      */
-    private fun nights(date: LocalDate, night: DayWindow, span: DayWindow, zone: ZoneId): Flow<DayData> = combine(
+    private fun nights(date: LocalDate, night: DayWindow, span: DayWindow, readings: DayWindow, zone: ZoneId): Flow<DayData> = combine(
         sleep(date, span, zone),
-        combine(health.hrv(span), health.skinTemperature(span)) { h, s -> h to s },
-        combine(health.spo2(span), health.breathRate(span)) { o, b -> o to b },
+        combine(health.hrv(readings), health.skinTemperature(readings)) { h, s -> h to s },
+        combine(health.spo2(readings), health.breathRate(readings)) { o, b -> o to b },
         health.heartRate(night),
     ) { sleepParts, (hrv, skin), (spo2, breath), hr ->
         val (parts, sessions, osa) = sleepParts

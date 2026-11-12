@@ -37,7 +37,7 @@ internal object WorkoutDistance {
         val lo = maxOf(from, since)
         val memory = when {
             lo >= to -> null
-            gps -> route(track.route, lo, to, w.pauseRanges) to false
+            gps -> withSteps(w, track, lo, to)
             else -> steps(w, track, lo, to)?.let { it to true }
         }
         // Before a restart only the stored total is left, so the part of it the range keeps is its share of the time.
@@ -46,6 +46,19 @@ internal object WorkoutDistance {
         }
         if (memory == null && earlier == null) return null
         return (memory?.first ?: 0f) + (earlier?.first ?: 0f) to (memory?.second == true || earlier?.second == true)
+    }
+
+    /**
+     * The route's metres from [lo] to [to], with the steps walked before its first fix in front of them, since GPS
+     * takes a while to settle and those metres are real. Counted as from steps only when they are most of the
+     * distance, so a run GPS followed nearly all the way stays a GPS run.
+     */
+    private fun withSteps(w: AppWorkout, track: Track, lo: Long, to: Long): Pair<Float, Boolean> {
+        val metres = route(track.route, lo, to, w.pauseRanges)
+        val fix = Route.clean(track.route).first().t
+        val start = maxOf(lo, track.stepsSince)
+        val before = if (fix > start) steps(w, track, start, minOf(fix, to)) ?: 0f else 0f
+        return metres + before to (before > metres)
     }
 
     /** [w] with its distance over the range it shows ([shown]), or as it was when nothing says. */

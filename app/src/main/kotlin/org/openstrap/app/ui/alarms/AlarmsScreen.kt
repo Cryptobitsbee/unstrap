@@ -174,7 +174,7 @@ fun AlarmsScreen(
     }
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
         item { PageHeader(stringResource(R.string.you_alarms_title), onBack) }
-        state.error?.let { msg -> item { ErrorPanel(msg, state.busy, vm::refresh) } }
+        (state.error ?: state.alarmsError)?.let { msg -> item { ErrorPanel(msg, state.busy, vm::refresh) } }
         if (state.loading) {
             item { PagePanel { PageNote(stringResource(R.string.you_alarms_reading)) } }
             return@ScreenList
@@ -195,7 +195,7 @@ fun HealthAlertsScreen(vm: AlarmsViewModel, state: AlarmsUiState, contentPadding
     BackHandler(onBack = onBack)
     ScreenList(contentPadding, gutter = GlowLayout.Gutter) {
         item { PageHeader(stringResource(R.string.you_health_title), onBack) }
-        state.error?.let { msg -> item { ErrorPanel(msg, state.busy, vm::refresh) } }
+        (state.error ?: state.healthError)?.let { msg -> item { ErrorPanel(msg, state.busy, vm::refresh) } }
         if (state.loading) {
             item { PagePanel { PageNote(stringResource(R.string.you_alarms_reading)) } }
             return@ScreenList
