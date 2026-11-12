@@ -267,7 +267,7 @@ fun WeeklyRecapPage(view: RewardsView?, first: LocalDate, contentPadding: Paddin
             GoalWeekCard(
                 stringResource(if (week?.met == true) R.string.glow_goals_goal_met else R.string.glow_goals_weekly_goal),
                 count, goal, weekDots(view, first),
-                if (run > 0) {
+                if (week?.met == true && run > 0) {
                     pluralStringResource(R.plurals.glow_goals_weekly_streak, run, run)
                 } else {
                     (goal - count).coerceAtLeast(0).let { pluralStringResource(R.plurals.glow_goals_short_of_goal, it, it) }
