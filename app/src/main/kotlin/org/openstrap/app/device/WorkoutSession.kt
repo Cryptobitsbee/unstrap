@@ -136,6 +136,8 @@ class WorkoutSession(
     private val callRinging: () -> Boolean = { false },
     /** A finished workout was saved or changed, by its start: auto sync writes it to Health Connect. Returns at once. */
     private val onSaved: (start: Long) -> Unit = {},
+    /** A saved workout was deleted, by its start and the range it was recorded over: auto sync takes it out of Health Connect. */
+    private val onRemoved: (start: Long, from: Long, to: Long) -> Unit = { _, _, _ -> },
     /** Epoch seconds now. Tests pass a clock they move by hand. */
     private val clock: () -> Long = { System.currentTimeMillis() / 1000 },
     /** Where the workout's long-lived work runs: the app's scope, `AppContainer.appScope`. */
@@ -150,7 +152,7 @@ class WorkoutSession(
     /** Discard, trim and save from history: changes to workouts already saved, under the same [lock]. */
     private val editor = SavedWorkoutEditor(
         dao, settings, lock, onSaved, onDiscarded = ::closeDiscarded, log = { log(it) }, clock = clock, scope = scope,
-        track = { start -> if (start == trackStart) track() else null },
+        track = { start -> if (start == trackStart) track() else null }, onRemoved = onRemoved,
     )
 
     /**

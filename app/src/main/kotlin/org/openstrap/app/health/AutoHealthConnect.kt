@@ -116,6 +116,16 @@ class HealthConnectAutoSync(
         }
     }
 
+    /** A phone workout was deleted: takes its session and distance out of Health Connect now, as it is saved now. */
+    fun workoutDiscarded(start: Long, from: Long, to: Long) {
+        scope.launch {
+            guarded("workout $start deleted") {
+                exporter.deleteWorkout(start, from, to)
+                Log.i(TAG, "health connect: took out workout $start")
+            }
+        }
+    }
+
     /**
      * A sleep or nap the strap started at [strapStart] was moved, deleted or brought back: writes its night again now
      * ([AutoHealthConnect.sleepRange]), not on the next sync, so Health Connect moves or drops it too.

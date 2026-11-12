@@ -701,6 +701,32 @@ class WorkoutSessionTest {
     }
 
     @Test
+    fun aTrimWorksTheFastestStretchesOutAgainFromTheKeptRoute() {
+        val t0 = clock.now - 7200
+        // A straight line at 3 m/s for twenty minutes, a fix every 10 s: 3.6 km.
+        val route = (0L..1200L step 10).map { Route.Point(t0 + it, 51.5 + it * 3 / 111_195.0, -0.1, 5f) }
+        val first = org.openstrap.app.data.Rewards.Stretch(1000, 333, t0)
+        runBlocking {
+            db.healthDao().upsertAppWorkout(
+                AppWorkout(
+                    start = t0, end = t0 + 1200, sportType = SportTypes.WALK, useGps = true, keepRoute = true,
+                    distanceMeters = Route.distance(route).toFloat(), stretches = first.code,
+                ),
+            )
+            db.healthDao().insertRoutePoints(route.map { AppWorkoutRoutePoint.of(t0, it) })
+        }
+        val s = session()
+        s.trim(t0, from = t0 + 300, to = t0 + 1200)
+        val trimmed = storedOnce(t0) { it?.shownStart == t0 + 300 }!!
+        val kept = org.openstrap.app.data.Rewards.Stretch.parse(trimmed.stretches).single { it.meters == 1000 }
+        assertTrue(kept.start >= t0 + 300)
+        assertEquals(333f, kept.seconds.toFloat(), 5f)
+        s.undoTrim(t0)
+        val back = storedOnce(t0) { it?.shownStart == null }!!
+        assertTrue(org.openstrap.app.data.Rewards.Stretch.parse(back.stretches).any { it.meters == 1000 })
+    }
+
+    @Test
     fun aTrimWithNoRouteLeftKeepsTheShareOfTheDistance() {
         val t0 = clock.now - 3600
         runBlocking { db.healthDao().upsertAppWorkout(AppWorkout(start = t0, end = t0 + 600, sportType = SportTypes.WALK, useGps = true, distanceMeters = 3_000f)) }

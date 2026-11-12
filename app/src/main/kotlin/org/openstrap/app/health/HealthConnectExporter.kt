@@ -306,6 +306,14 @@ class HealthConnectExporter(private val context: Context, private val dao: Healt
     }
 
     /**
+     * The phone workout [start], deleted, taken out of Health Connect: its exercise session and distance, found within
+     * [from, to], all it was recorded over. Its days' calories are written again by the next sync, as any change to them.
+     */
+    suspend fun deleteWorkout(start: Long, from: Long, to: Long) {
+        writeLock.withLock { store.dropPhoneWorkout(start, from, to) }
+    }
+
+    /**
      * Active kcal an hour and each finished full day's total ([CalorieRecords]) over the whole local days [from] to
      * [to] are in, from the stored days, each only with its permission granted. A day worked out again can lose an
      * hour or turn partial, so OpenStrap's calorie records over those days are replaced, as its sleep is: with the
@@ -663,6 +671,23 @@ internal suspend fun RecordStore.dropStaleStrapWorkouts(from: Long, to: Long, wr
         r.metadata.clientRecordId?.startsWith(STRAP_WORKOUT_PREFIX) == true && r.metadata.clientRecordId !in keep
     }.map { it.metadata.id }
     stale.chunked(HC_BATCH).forEach { deleteIds(androidx.health.connect.client.records.ExerciseSessionRecord::class, it) }
+}
+
+/**
+ * Takes out OpenStrap's own exercise session and distance records of the phone workout [start], found within
+ * [from, to] (all it was recorded over): the workout was deleted. Nothing is taken out when the records can't be read.
+ */
+internal suspend fun RecordStore.dropPhoneWorkout(start: Long, from: Long, to: Long) {
+    // A day wider each side: the ids pick the records, so the range only has to hold them, however the filter treats
+    // a session's ends.
+    val range = TimeRangeFilter.between(Instant.ofEpochSecond(from).minus(Duration.ofDays(1)), Instant.ofEpochSecond(to).plus(Duration.ofDays(1)))
+    for ((type, id) in listOf(
+        androidx.health.connect.client.records.ExerciseSessionRecord::class to "openstrap:workout:$start",
+        androidx.health.connect.client.records.DistanceRecord::class to "openstrap:distance:$start",
+    )) {
+        val stale = ownRecords(type, range).orEmpty().filter { it.metadata.clientRecordId == id }.map { it.metadata.id }
+        stale.chunked(HC_BATCH).forEach { deleteIds(type, it) }
+    }
 }
 
 /** The blood oxygen percents that are kept, and so exported: Zepp's range. */
