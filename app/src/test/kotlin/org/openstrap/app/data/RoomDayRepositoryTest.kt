@@ -16,6 +16,7 @@ import org.openstrap.app.data.db.ActivityMinute
 import org.openstrap.app.data.db.HrvSample
 import org.openstrap.app.data.db.OpenStrapDatabase
 import org.openstrap.app.data.db.SleepSession
+import org.openstrap.app.data.db.Spo2Sample
 import org.openstrap.app.testing.ZoneRule
 import org.openstrap.app.testing.inMemoryDb
 import org.openstrap.protocol.services.StepTotals
@@ -89,6 +90,18 @@ class RoomDayRepositoryTest {
         assertEquals(main, d.nights.last().session)
         assertEquals(60f, d.nights.last().hrv)
         assertEquals(listOf(60), d.sleepHrv.map { it.milliseconds })
+    }
+
+    @Test fun `the oldest night's averages include its evening, from before that midnight`() {
+        val oldest = date.minusDays(SleepHistory.NIGHTS - 1L)
+        // It began at 23:00 the evening before its day, so the reading at 23:30 is before the midnight its day starts at.
+        runBlocking {
+            db.healthDao().insertSleepSessions(listOf(SleepSession(at(oldest.minusDays(1), 23), at(oldest, 7))))
+            db.healthDao().insertSpo2(listOf(Spo2Sample(at(oldest.minusDays(1), 23, 30), 95)))
+        }
+        val d = day { n -> n.nights.first().spo2 != null }
+        assertEquals(oldest, d.nights.first().date)
+        assertEquals(95f, d.nights.first().spo2)
     }
 
     @Test fun `the week's trends run to the day shown, with nothing where a day has no data`() {
