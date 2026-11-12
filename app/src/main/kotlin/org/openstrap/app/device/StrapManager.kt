@@ -388,7 +388,8 @@ class StrapManager(
                 val write = SettingsCodec.calorieTargetFor(group, kcal)
                 if (write != null) {
                     val ack = commands.command(Endpoints.SETTINGS, write)
-                    log(if (SettingsCodec.isWriteSuccess(ack)) "calorie goal sent: $kcal" else "calorie goal refused: ${ack.toHex()}")
+                    if (!SettingsCodec.isWriteSuccess(ack)) return@catching log("calorie goal refused: ${ack.toHex()}")
+                    log("calorie goal sent: $kcal")
                 }
                 settings.setSentToStrap(SENT_CALORIE_GOAL, kcal.toLong())
             }.onFailure { log("calorie goal send failed: $it") }
