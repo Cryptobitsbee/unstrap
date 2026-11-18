@@ -134,6 +134,7 @@ fun WorkoutMap(
                     PropertyFactory.circleStrokeColor(Color.White.toArgb()),
                 ),
             )
+            underRoute(s, streets = !routeOnly)
             s.addLayer(
                 LineLayer(LINE, SOURCE).withProperties(
                     PropertyFactory.lineColor(Expression.get("color")),
@@ -190,7 +191,45 @@ fun WorkoutMap(
 /** Close enough to read the streets, far enough to see where they go. */
 private const val MAX_ZOOM = 16.5
 
+/** The dark edge under the route line: a line 5 wide on one 9 wide leaves 2 each side. */
+private const val CASING_WIDTH = 9f
+private const val CASING_OPACITY = 0.6f
+
+/**
+ * OpenFreeMap's dark style draws streets a shade off its ground (#181818 on #0C0C0C), which is about invisible on a phone
+ * outdoors, so a route seems to run through blocks rather than along streets. These lift each kind of street just enough
+ * to read, still well under the route's colours. A layer the style no longer has is skipped.
+ */
+private val STREET_COLOURS = listOf(
+    "highway_minor" to 0xFF2C2C30.toInt(),
+    "highway_path" to 0xFF3C3C42.toInt(),
+    "highway_major_casing" to 0xFF404046.toInt(),
+    "highway_major_inner" to 0xFF27272B.toInt(),
+    "highway_motorway_casing" to 0xFF46464C.toInt(),
+    "highway_motorway_inner" to 0xFF2A2A2E.toInt(),
+)
+
+/**
+ * What the route line goes over: the [streets] lifted when the map has them ([STREET_COLOURS]), and a dark edge under
+ * the line, so a zone's colour reads the same over a street, a park or a building.
+ */
+private fun underRoute(style: Style, streets: Boolean) {
+    if (streets) {
+        for ((id, colour) in STREET_COLOURS) (style.getLayer(id) as? LineLayer)?.setProperties(PropertyFactory.lineColor(colour))
+    }
+    style.addLayer(
+        LineLayer(CASING, SOURCE).withProperties(
+            PropertyFactory.lineColor(Color.Black.toArgb()),
+            PropertyFactory.lineOpacity(CASING_OPACITY),
+            PropertyFactory.lineWidth(CASING_WIDTH),
+            PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+            PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+        ),
+    )
+}
+
 private const val SOURCE = "route"
+private const val CASING = "route-casing"
 private const val HERE = "here"
 private const val LINE = "route-line"
 private const val DOT = "here-dot"

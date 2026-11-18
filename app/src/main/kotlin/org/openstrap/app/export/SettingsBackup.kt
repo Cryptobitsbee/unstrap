@@ -51,6 +51,7 @@ object SettingsBackup {
             CALL_BUZZ to Type.STRING,
             CALL_BUZZ_LENGTH to Type.STRING,
             UPDATE_AUTO to Type.BOOLEAN,
+            ROUTE_ROADS to Type.BOOLEAN,
             QUIET_HOURS to Type.BOOLEAN,
             QUIET_FROM_MINUTES to Type.INT,
             QUIET_TO_MINUTES to Type.INT,

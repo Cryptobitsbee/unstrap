@@ -43,6 +43,11 @@
     <string name="glow_summary_period_avg">平均</string>
     <string name="glow_summary_route">路线</string>
     <string name="glow_summary_climb">爬升 %1$d 米</string>
+    <string name="glow_summary_route_roads">道路</string>
+    <string name="glow_summary_route_gps">GPS</string>
+    <string name="glow_summary_route_matching">正在将路线匹配到道路</string>
+    <string name="glow_summary_route_not_on_roads">这条路线沿着地图道路的部分太少，按 GPS 记录显示。</string>
+    <string name="glow_summary_route_offline">无法加载道路，路线按 GPS 记录显示。下次会再试。</string>
     <string name="glow_summary_sets_title">组数</string>
     <string name="glow_summary_peak_heart_rate">最高心率</string>
     <string name="glow_summary_set_peak">最高 %1$d</string>

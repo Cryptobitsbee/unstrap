@@ -168,6 +168,8 @@ internal object Architecture {
         "zepp" to setOf("i18n", "firmware", "data"),
         "data" to setOf("i18n", "ble", "firmware", "zepp", "data"),
         "presentation" to setOf("i18n", "data"),
+        // Map tiles and a route along the roads: plain Kotlin over the data layer's routes.
+        "maps" to setOf("i18n", "data"),
         "device" to setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", ROOT),
         "health" to setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", "device", ROOT),
         "export" to setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", "device", ROOT),
@@ -176,11 +178,13 @@ internal object Architecture {
             "i18n", "ble", "firmware", "zepp", "data", "presentation", "device", "health", "export", "update", ROOT,
             "ui.glow.draw", "ui.theme",
         ),
-        "ui" to setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", "device", "health", "export", "update", ROOT, "ui"),
+        "ui" to setOf(
+            "i18n", "ble", "firmware", "zepp", "data", "presentation", "device", "health", "export", "update", "maps", ROOT, "ui",
+        ),
     )
 
     /** Packages with no Compose at all, in imports or in code. */
-    val NO_COMPOSE = setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", "device", "health", "export", "update")
+    val NO_COMPOSE = setOf("i18n", "ble", "firmware", "zepp", "data", "presentation", "device", "health", "export", "update", "maps")
 
     /**
      * The entry points a lower layer may name: to reach the container's owner, build an intent, read the build. `R`

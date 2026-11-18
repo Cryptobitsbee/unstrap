@@ -60,6 +60,10 @@ class AppContainer(val app: Application) {
     val updater = org.openstrap.app.update.AppUpdater(
         app, settings, recording = { workout.state.value is org.openstrap.app.device.WorkoutState.Recording }, scope = appScope,
     )
+    /** A GPS workout's route along the roads, for the route card; the road tiles it reads are kept in the cache dir. */
+    val routeSnapper = org.openstrap.app.maps.RouteSnapper(
+        org.openstrap.app.maps.RoadTiles(java.io.File(app.cacheDir, "road-tiles"), "unstrap/${BuildConfig.VERSION_NAME}"),
+    )
     /** Save a copy, Restore and automatic backup's zip. What a restore couldn't do goes to Diagnostics. */
     val backups: org.openstrap.app.data.BackupRepository =
         org.openstrap.app.export.CsvBackups(app, database, settings, csv, log = { (strap as? StrapManager)?.log(it) })

@@ -385,8 +385,14 @@ object Route {
      * The route cut into stretches of one zone each, for drawing it in zone colours: each fix takes the zone of the
      * nearest heart rate within [MAX_HR_GAP_S] (time, bpm, ascending), else none (−1, drawn grey).
      */
-    fun byZone(points: List<Point>, hr: List<Pair<Long, Int>>, maxHr: Int, zones: HeartZones): List<Pair<List<Point>, Int>> {
-        val clean = track(points)
+    fun byZone(points: List<Point>, hr: List<Pair<Long, Int>>, maxHr: Int, zones: HeartZones): List<Pair<List<Point>, Int>> =
+        lineByZone(track(points), hr, maxHr, zones)
+
+    /**
+     * [byZone] for a line that is already the one to draw, as it is: the route along the roads
+     * ([org.openstrap.app.maps.RouteSnapper]), whose points carry the track's times.
+     */
+    fun lineByZone(clean: List<Point>, hr: List<Pair<Long, Int>>, maxHr: Int, zones: HeartZones): List<Pair<List<Point>, Int>> {
         if (clean.size < 2) return emptyList()
         val times = hr.map { it.first }
         fun zoneAt(t: Long): Int {

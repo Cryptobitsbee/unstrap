@@ -76,6 +76,12 @@ import org.openstrap.app.ui.dashboard.rimLit
 import org.openstrap.app.ui.components.cardNumber
 import androidx.compose.ui.text.style.TextOverflow
 import org.openstrap.app.ui.dashboard.LocalHeartZones
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
+import org.openstrap.app.maps.RouteSnapper
 
 /*
  * The summary right after a workout (workouts spec 2.8): the sport and when, a hero with the one number that matters for
@@ -333,13 +339,44 @@ private fun DropLine(readings: List<Pair<Long, Int>>, end: Long, modifier: Modif
 internal fun RouteMap(summary: PhoneSummary, modifier: Modifier = Modifier) {
     val heartZones = LocalHeartZones.current
     if (!Route.mappable(summary.route)) return
-    val stretches = remember(summary, heartZones) {
-        Route.byZone(summary.route, summary.history, summary.analysis.maxHeartRate, heartZones)
+    // The app's snapper and setting; a preview or a layout test has neither, and draws the GPS line.
+    val container = (LocalContext.current.applicationContext as? org.openstrap.app.OpenStrapApp)?.container
+    val roadsSetting = remember(container) { container?.settings?.routeRoads ?: flowOf(false) }
+    // Unknown until read, so nothing is fetched for someone who chose GPS.
+    val roads by roadsSetting.collectAsStateWithLifecycle(initialValue = null as Boolean?)
+    val outcome by produceState<RouteSnapper.Outcome?>(null, summary.route, roads, container) {
+        value = null
+        if (roads == true && container != null) value = container.routeSnapper.snap(summary.route)
     }
-    Box(modifier.fillMaxWidth().height(170.dp).clip(GlowLayout.TileShape).background(Raised)) {
-        WorkoutMap(stretches, routeOnly = false, Modifier.fillMaxSize())
+    val snapped = (outcome as? RouteSnapper.Outcome.Snapped)?.line?.takeIf { roads == true }
+    val stretches = remember(summary, heartZones, snapped) {
+        val maxHr = summary.analysis.maxHeartRate
+        if (snapped != null) Route.lineByZone(snapped, summary.history, maxHr, heartZones)
+        else Route.byZone(summary.route, summary.history, maxHr, heartZones)
+    }
+    val scope = rememberCoroutineScope()
+    Column(modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(170.dp).clip(GlowLayout.TileShape).background(Raised)) {
+            WorkoutMap(stretches, routeOnly = false, Modifier.fillMaxSize())
+            val on = roads
+            if (container != null && on != null) RouteLineChoice(
+                roads = on, working = on && outcome == null,
+                onChoose = { scope.launch { container.settings.setRouteRoads(it) } },
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
+            )
+        }
+        val note = when (outcome.takeIf { roads == true }) {
+            RouteSnapper.Outcome.NotOnRoads -> R.string.glow_summary_route_not_on_roads
+            RouteSnapper.Outcome.Failed -> R.string.glow_summary_route_offline
+            else -> null
+        }
+        if (note != null) Text(
+            stringResource(note), color = Color.White.copy(alpha = GlowType.SECONDARY_ALPHA), style = GlowType.secondary,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
+
 
 /**
  * Load from this workout against your [usual] workout Load (spec 2.5, Picture card): unlit when usual; above or below

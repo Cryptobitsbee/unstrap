@@ -95,6 +95,16 @@
     <string name="glow_summary_route">Route</string>
     <!-- Beside the route's title: how far it climbed, in metres. -->
     <string name="glow_summary_climb">Climb <xliff:g id="meters" example="42">%1$d</xliff:g> m</string>
+    <!-- A choice over the route map: draw the route along the streets it took, matched to the map's roads. One short word. -->
+    <string name="glow_summary_route_roads">Roads</string>
+    <!-- The other choice over the route map: draw the route as the phone's GPS recorded it. Keep GPS as it is. -->
+    <string name="glow_summary_route_gps">GPS</string>
+    <!-- For screen readers, on the Roads choice while the route is being matched to the roads. -->
+    <string name="glow_summary_route_matching">Matching the route to the roads</string>
+    <!-- Under the route map when Roads is chosen but too little of the route ran along mapped roads (a field, a track). -->
+    <string name="glow_summary_route_not_on_roads">Too little of this route runs along mapped roads, so it shows as GPS recorded it.</string>
+    <!-- Under the route map when Roads is chosen but the roads couldn't be loaded, usually with no internet. -->
+    <string name="glow_summary_route_offline">The roads couldn\'t be loaded, so the route shows as GPS recorded it. It tries again next time.</string>
     <!-- Title of the card and the list with each set of a strength workout. One word. -->
     <string name="glow_summary_sets_title">Sets</string>
     <!-- Beside the sets card's title: each bar is the set's peak heart rate. Short. -->
